@@ -250,6 +250,7 @@ public class ApplicationLoader extends Application {
         SharedPrefsHelper.init(applicationContext);
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) { //TODO improve account
             UserConfig.getInstance(a).loadConfig();
+            org.telegram.messenger.monogram.MonogramAuthManager.restoreLocalAccountIfNeeded(a);
             MessagesController.getInstance(a);
             if (a == 0) {
                 SharedConfig.pushStringStatus = "__FIREBASE_GENERATING_SINCE_" + ConnectionsManager.getInstance(a).getCurrentTime() + "__";
