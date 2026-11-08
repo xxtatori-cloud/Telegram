@@ -122,7 +122,7 @@ public class MonogramAuthManager {
         firstName = firstName.trim();
         lastName = lastName != null ? lastName.trim() : "";
         username = username != null ? username.trim().replace("@", "") : "";
-        displayPhone = displayPhone != null ? displayPhone.trim().replaceAll("[^0-9+]", "") : "";
+        displayPhone = displayPhone != null ? displayPhone.trim().replaceAll("[^A-Za-z0-9+_-]", "") : "";
 
         long newUserId = generateUniqueUserId();
         MonogramConfig config = MonogramConfig.getInstance();
@@ -271,6 +271,7 @@ public class MonogramAuthManager {
 
         userConfig.setCurrentUser(user);
         userConfig.saveConfig(true);
+        MonogramCloudBridge.loadDirectoryUsers(account);
         FileLog.d("MONOGRAM restored local profile " + activeUserId + " for account slot " + account);
         return true;
     }
