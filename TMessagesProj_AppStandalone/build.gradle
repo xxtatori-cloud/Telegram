@@ -1,6 +1,11 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.telegram.build-app-plugin'
 
+// Only load MONOGRAM's dedicated Firebase project config when it is supplied.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 repositories {
     mavenCentral()
     google()
