@@ -194,6 +194,7 @@ public final class MonogramBackend {
                 if (!access.isEmpty() && !userId.isEmpty()) {
                     try {
                         JSONObject profile = fetchProfile(access, userId);
+                        registerPendingDeviceToken(context);
                         Session session = new Session(userId, access, refresh, profile);
                         deliverSuccess(callback, session);
                         return;
@@ -274,7 +275,7 @@ public final class MonogramBackend {
                 String chatId = result.optString("_array", "");
                 if (chatId.isEmpty()) chatId = result.optString("id", result.toString().replace("\"", ""));
                 final String value = chatId;
-                MAIN.post(() -> callback.onSuccess(value));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(value));
             } catch (Exception e) {
                 FileLog.e(e);
                 deliverError(callback, e.getMessage());
@@ -296,7 +297,7 @@ public final class MonogramBackend {
                 JSONArray rows = result.optJSONArray("_array");
                 if (rows == null || rows.length() == 0) throw new IllegalStateException("Server did not save the message.");
                 Message message = new Message(rows.getJSONObject(0));
-                MAIN.post(() -> callback.onSuccess(message));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(message));
             } catch (Exception e) {
                 FileLog.e(e);
                 deliverError(callback, e.getMessage());
@@ -315,7 +316,7 @@ public final class MonogramBackend {
                 JSONArray rows = result.optJSONArray("_array");
                 java.util.ArrayList<Message> messages = new java.util.ArrayList<>();
                 if (rows != null) for (int i = 0; i < rows.length(); i++) messages.add(new Message(rows.getJSONObject(i)));
-                MAIN.post(() -> callback.onSuccess(messages));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(messages));
             } catch (Exception e) {
                 FileLog.e(e);
                 deliverError(callback, e.getMessage());
@@ -330,7 +331,7 @@ public final class MonogramBackend {
                 JSONObject result = request("GET", "/rest/v1/gift_catalog?select=slug,title,asset_key,supply_limit,next_serial,price_stars&enabled=eq.true&order=title.asc",
                         token, null, null);
                 JSONArray rows = result.optJSONArray("_array");
-                MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
             } catch (Exception e) {
                 FileLog.e(e);
                 deliverError(callback, e.getMessage());
