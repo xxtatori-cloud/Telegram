@@ -127,7 +127,7 @@ public class MonogramAuthManager {
         // Check if this is the first MONOGRAM account ever created
         boolean isOwner = serverOwner;
         if (isOwner) {
-            config.setInitialOwnerIfNone(newUserId);
+            config.setOwnerUserId(newUserId);
         }
 
         TLRPC.TL_user user = new TLRPC.TL_user();
