@@ -152,6 +152,11 @@ public final class MonogramBackend {
             throw new IllegalStateException("MONOGRAM server (" + status + "): " + message);
         }
         if (raw.isEmpty()) return new JSONObject();
+        if (raw.startsWith("\"") || raw.equals("true") || raw.equals("false") || raw.matches("-?[0-9]+")) {
+            JSONObject wrapper = new JSONObject();
+            wrapper.put("_scalar", new org.json.JSONTokener(raw).nextValue().toString());
+            return wrapper;
+        }
         if (raw.startsWith("[")) {
             JSONObject wrapper = new JSONObject();
             wrapper.put("_array", new JSONArray(raw));
