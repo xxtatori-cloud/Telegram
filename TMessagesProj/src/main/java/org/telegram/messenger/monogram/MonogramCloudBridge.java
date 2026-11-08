@@ -101,13 +101,18 @@ public final class MonogramCloudBridge {
     }
 
     public static TLRPC.Message messageFromJson(int account, long dialogId, JSONObject json) {
-        if (json == null || dialogId <= 0) return null;
+        if (json == null || dialogId == 0) return null;
         String senderId = json.optString("sender_id", "");
         String selfBackendId = MonogramBackend.getCurrentUserId(
                 org.telegram.messenger.ApplicationLoader.applicationContext);
         long selfId = UserConfig.getInstance(account).getClientUserId();
-        long peerId = dialogId;
+        long peerId = Math.abs(dialogId);
         boolean outgoing = senderId.equals(selfBackendId);
+        long senderLocalId = selfId;
+        if (!outgoing) {
+            MonogramConfig.MonogramUserRecord senderRecord = MonogramConfig.getInstance().getUserRecordByBackendId(senderId);
+            if (senderRecord != null) senderLocalId = senderRecord.userId;
+        }
 
         TLRPC.TL_message message = new TLRPC.TL_message();
         message.id = (json.optString("id", "").hashCode() & 0x7fffffff) + 1;
@@ -120,9 +125,14 @@ public final class MonogramCloudBridge {
         message.flags = TLRPC.MESSAGE_FLAG_HAS_FROM_ID;
         if (outgoing) message.flags |= 2;
         message.from_id = new TLRPC.TL_peerUser();
-        message.from_id.user_id = outgoing ? selfId : peerId;
-        message.peer_id = new TLRPC.TL_peerUser();
-        message.peer_id.user_id = peerId;
+        message.from_id.user_id = outgoing ? selfId : senderLocalId;
+        if (dialogId < 0) {
+            message.peer_id = new TLRPC.TL_peerChat();
+            message.peer_id.chat_id = peerId;
+        } else {
+            message.peer_id = new TLRPC.TL_peerUser();
+            message.peer_id.user_id = peerId;
+        }
         message.media = new TLRPC.TL_messageMediaEmpty();
         message.entities = new ArrayList<>();
         return message;
@@ -142,19 +152,49 @@ public final class MonogramCloudBridge {
         for (int i = 0; chats != null && i < chats.length(); i++) {
             try {
                 JSONObject chat = chats.getJSONObject(i);
-                if (chat.optBoolean("is_group", false)) continue;
                 String chatId = chat.optString("id", "");
+                boolean isGroup = chat.optBoolean("is_group", false);
                 JSONArray members = chat.optJSONArray("members");
                 if (members == null || members.length() == 0) continue;
-                JSONObject peerProfile = members.getJSONObject(0);
-                TLRPC.User peer = userFromProfile(account, peerProfile);
-                if (peer == null) continue;
-                users.put(peer.id, peer);
 
+                long dialogId;
                 TLRPC.TL_dialog dialog = new TLRPC.TL_dialog();
-                dialog.id = peer.id;
-                dialog.peer = new TLRPC.TL_peerUser();
-                dialog.peer.user_id = peer.id;
+                if (isGroup) {
+                    long localChatId;
+                    try {
+                        localChatId = UUID.fromString(chatId).getMostSignificantBits() & 0x7fffffffL;
+                    } catch (Exception e) {
+                        localChatId = (chatId.hashCode() & 0x7fffffffL);
+                    }
+                    if (localChatId == 0) localChatId = i + 1;
+                    TLRPC.TL_chat group = new TLRPC.TL_chat();
+                    group.id = localChatId;
+                    group.title = chat.optString("title", "MONOGRAM Group");
+                    group.photo = new TLRPC.TL_chatPhotoEmpty();
+                    group.date = (int) (System.currentTimeMillis() / 1000L);
+                    group.version = 1;
+                    group.participants_count = members.length() + 1;
+                    group.left = false;
+                    result.chats.add(group);
+                    dialogId = -localChatId;
+                    dialog.id = dialogId;
+                    dialog.peer = new TLRPC.TL_peerChat();
+                    dialog.peer.chat_id = localChatId;
+                } else {
+                    JSONObject peerProfile = members.getJSONObject(0);
+                    TLRPC.User peer = userFromProfile(account, peerProfile);
+                    if (peer == null) continue;
+                    users.put(peer.id, peer);
+                    dialogId = peer.id;
+                    dialog.id = dialogId;
+                    dialog.peer = new TLRPC.TL_peerUser();
+                    dialog.peer.user_id = peer.id;
+                }
+
+                for (int j = 0; j < members.length(); j++) {
+                    TLRPC.User member = userFromProfile(account, members.getJSONObject(j));
+                    if (member != null) users.put(member.id, member);
+                }
                 dialog.folder_id = 0;
                 dialog.unread_count = 0;
                 dialog.unread_mentions_count = 0;
@@ -165,7 +205,7 @@ public final class MonogramCloudBridge {
 
                 JSONArray messages = chat.optJSONArray("messages");
                 if (messages != null && messages.length() > 0) {
-                    TLRPC.Message last = messageFromJson(account, peer.id, messages.getJSONObject(0));
+                    TLRPC.Message last = messageFromJson(account, dialogId, messages.getJSONObject(0));
                     if (last != null) {
                         dialog.top_message = last.id;
                         dialog.last_message_date = last.date;
