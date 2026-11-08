@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 
-import org.telegram.messenger.ApplicationLoader;
 import org.telegram.ui.LaunchActivity;
 
 public final class MonogramFirebaseMessagingService extends FirebaseMessagingService {
@@ -45,7 +44,7 @@ public final class MonogramFirebaseMessagingService extends FirebaseMessagingSer
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
 
         NotificationCompat.Builder notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(org.telegram.messenger.R.drawable.msg_filled)
+                .setSmallIcon(android.R.drawable.sym_action_chat)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
