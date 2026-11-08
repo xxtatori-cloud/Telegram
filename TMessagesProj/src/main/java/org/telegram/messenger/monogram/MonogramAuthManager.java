@@ -142,11 +142,13 @@ public class MonogramAuthManager {
                 UserConfig uc = UserConfig.getInstance(currentAccount);
                 MessagesStorage ms = MessagesStorage.getInstance(currentAccount);
 
-                mc.cleanup();
+                // Reset the account slot once before installing the new local profile.
+                // The previous double cleanup needlessly reset controller state twice.
                 uc.clearConfig();
                 mc.cleanup();
 
                 uc.setCurrentUser(finalUser);
+                config.setActiveUserId(currentAccount, finalUser.id);
                 uc.saveConfig(true);
 
                 ms.cleanup(true);
@@ -176,6 +178,55 @@ public class MonogramAuthManager {
                 }
             }
         });
+    }
+
+    /**
+     * Restores a local MONOGRAM profile when Telegram's deferred UserConfig write was
+     * interrupted by process death. This restores only the local profile; it does not
+     * create or impersonate a Telegram server session.
+     */
+    public static boolean restoreLocalAccountIfNeeded(int account) {
+        UserConfig userConfig = UserConfig.getInstance(account);
+        if (userConfig.isClientActivated()) {
+            return false;
+        }
+
+        MonogramConfig config = MonogramConfig.getInstance();
+        long activeUserId = config.getActiveUserId(account);
+        if (activeUserId == 0) {
+            return false;
+        }
+
+        MonogramConfig.MonogramUserRecord record = config.getUserRecord(activeUserId);
+        if (record == null) {
+            config.clearActiveUserId(account);
+            return false;
+        }
+
+        TLRPC.TL_user user = new TLRPC.TL_user();
+        user.id = record.userId;
+        user.first_name = record.firstName != null ? record.firstName : "";
+        user.last_name = record.lastName != null ? record.lastName : "";
+        user.username = record.username != null ? record.username : "";
+        user.phone = record.phone != null ? record.phone : "";
+        user.self = true;
+        user.flags |= 1024;
+        if (record.isOwner) {
+            user.verified = true;
+            user.flags |= 131072;
+        }
+        if (MonogramEconomy.getInstance().isPremiumEnabled()) {
+            user.premium = true;
+            user.flags |= 268435456;
+        }
+        user.status = new TLRPC.TL_userStatusOnline();
+        user.status.expires = Integer.MAX_VALUE;
+        user.photo = new TLRPC.TL_userProfilePhotoEmpty();
+
+        userConfig.setCurrentUser(user);
+        userConfig.saveConfig(true);
+        FileLog.d("MONOGRAM restored local profile " + activeUserId + " for account slot " + account);
+        return true;
     }
 
     /**
