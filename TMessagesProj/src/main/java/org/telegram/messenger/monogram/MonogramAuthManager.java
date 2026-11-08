@@ -205,6 +205,7 @@ public class MonogramAuthManager {
                 mc.putUser(finalUser, false);
 
                 ContactsController.getInstance(currentAccount).checkAppAccount();
+                MonogramCloudBridge.loadDirectoryUsers(currentAccount);
                 mc.loadAppConfig();
                 mc.putDialogsEndReachedAfterRegistration();
                 MediaDataController.getInstance(currentAccount).loadStickersByEmojiOrName(
