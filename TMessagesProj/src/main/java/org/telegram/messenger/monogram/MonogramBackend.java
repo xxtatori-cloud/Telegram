@@ -388,8 +388,8 @@ public final class MonogramBackend {
                 String token = getAccessToken(context);
                 String userId = getCurrentUserId(context);
                 if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
-                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id),messages(id,chat_id,sender_id,body,created_at)"
-                        + "&chat_members.user_id=eq." + URLEncoder.encode(userId, "UTF-8")
+                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id),membership_filter:chat_members!inner(user_id),messages(id,chat_id,sender_id,body,created_at)"
+                        + "&membership_filter.user_id=eq." + URLEncoder.encode(userId, "UTF-8")
                         + "&messages.order=created_at.desc&messages.limit=1&order=created_at.desc";
                 JSONObject result = request("GET", path, token, null, null);
                 JSONArray rows = result.optJSONArray("_array");
