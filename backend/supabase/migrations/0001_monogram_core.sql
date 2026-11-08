@@ -254,11 +254,7 @@ using (true);
 create policy "Users update their own profile"
 on public.profiles for update to authenticated
 using (user_id = auth.uid())
-with check (
-    user_id = auth.uid()
-    and is_owner = (select p.is_owner from public.profiles p where p.user_id = auth.uid())
-    and premium_enabled = true
-);
+with check (user_id = auth.uid());
 
 create policy "Members can view their chats"
 on public.chats for select to authenticated
