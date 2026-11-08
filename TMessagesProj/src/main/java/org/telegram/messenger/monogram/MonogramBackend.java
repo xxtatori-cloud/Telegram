@@ -401,6 +401,73 @@ public final class MonogramBackend {
         });
     }
 
+    public static void sendDirectMessage(Context context, String otherUserId, String body, Callback<Message> callback) {
+        createDirectChat(context, otherUserId, new Callback<String>() {
+            @Override
+            public void onSuccess(String chatId) {
+                sendMessage(context, chatId, body, callback);
+            }
+
+            @Override
+            public void onError(String message) {
+                deliverError(callback, message);
+            }
+        });
+    }
+
+    public static void uploadMedia(Context context, java.io.File file, String contentType, Callback<String> callback) {
+        IO.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                if (file == null || !file.isFile()) throw new IllegalArgumentException("Media file does not exist.");
+                String objectPath = userId + "/" + System.currentTimeMillis() + "_" + file.getName().replaceAll("[^A-Za-z0-9._-]", "_");
+                URL url = new URL(baseUrl() + "/storage/v1/object/monogram-media/" + objectPath);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(20000);
+                connection.setReadTimeout(30000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("apikey", apiKey());
+                connection.setRequestProperty("Authorization", "Bearer " + token);
+                connection.setRequestProperty("Content-Type", contentType == null ? "application/octet-stream" : contentType);
+                connection.setRequestProperty("x-upsert", "false");
+                try (java.io.FileInputStream input = new java.io.FileInputStream(file);
+                     OutputStream output = connection.getOutputStream()) {
+                    byte[] buffer = new byte[16384];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                }
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) throw new IllegalStateException("Media upload failed (" + status + ").");
+                MAIN.post(() -> { if (callback != null) callback.onSuccess(objectPath); });
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
+    public static void updateProfile(Context context, JSONObject changes, Callback<Boolean> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                request("PATCH", "/rest/v1/profiles?user_id=eq." + URLEncoder.encode(userId, "UTF-8"),
+                        token, changes, "return=minimal");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(true));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
     public static void createGroupChat(Context context, String title, JSONArray memberIds, Callback<String> callback) {
         IO.execute(() -> {
             try {
