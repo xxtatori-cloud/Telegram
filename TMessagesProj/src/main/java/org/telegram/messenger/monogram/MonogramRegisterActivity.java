@@ -160,7 +160,17 @@ public class MonogramRegisterActivity extends BaseFragment implements ImageUpdat
         firstNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         firstNameField.setSingleLine(true);
         firstNameField.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        firstNameContainer.attachEditText(firstNameField);
+        firstNameField.setBackground(null);
+        firstNameField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
+        firstNameField.setOnFocusChangeListener((v, hasFocus) -> firstNameContainer.animateSelection(hasFocus ? 1f : 0f));
+        firstNameContainer.addView(firstNameField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        firstNameField.setOnEditorActionListener((textView, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                lastNameField.requestFocus();
+                return true;
+            }
+            return false;
+        });
         contentLayout.addView(firstNameContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
         // Last Name Input
@@ -171,7 +181,17 @@ public class MonogramRegisterActivity extends BaseFragment implements ImageUpdat
         lastNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         lastNameField.setSingleLine(true);
         lastNameField.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        lastNameContainer.attachEditText(lastNameField);
+        lastNameField.setBackground(null);
+        lastNameField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
+        lastNameField.setOnFocusChangeListener((v, hasFocus) -> lastNameContainer.animateSelection(hasFocus ? 1f : 0f));
+        lastNameContainer.addView(lastNameField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        lastNameField.setOnEditorActionListener((textView, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                usernameField.requestFocus();
+                return true;
+            }
+            return false;
+        });
         contentLayout.addView(lastNameContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
         // Username Input
@@ -182,7 +202,17 @@ public class MonogramRegisterActivity extends BaseFragment implements ImageUpdat
         usernameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         usernameField.setSingleLine(true);
         usernameField.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        usernameContainer.attachEditText(usernameField);
+        usernameField.setBackground(null);
+        usernameField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
+        usernameField.setOnFocusChangeListener((v, hasFocus) -> usernameContainer.animateSelection(hasFocus ? 1f : 0f));
+        usernameContainer.addView(usernameField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        usernameField.setOnEditorActionListener((textView, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                phoneField.requestFocus();
+                return true;
+            }
+            return false;
+        });
         contentLayout.addView(usernameContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 14));
 
         // Display Phone (Profile info only)
@@ -194,7 +224,17 @@ public class MonogramRegisterActivity extends BaseFragment implements ImageUpdat
         phoneField.setSingleLine(true);
         phoneField.setInputType(InputType.TYPE_CLASS_PHONE);
         phoneField.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        phoneContainer.attachEditText(phoneField);
+        phoneField.setBackground(null);
+        phoneField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
+        phoneField.setOnFocusChangeListener((v, hasFocus) -> phoneContainer.animateSelection(hasFocus ? 1f : 0f));
+        phoneContainer.addView(phoneField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
+        phoneField.setOnEditorActionListener((textView, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                submitRegistration();
+                return true;
+            }
+            return false;
+        });
         contentLayout.addView(phoneContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 0, 24));
 
         // Create Account Button
