@@ -27,6 +27,29 @@ public final class MonogramCloudBridge {
         return MonogramBackend.isConfigured() && MonogramConfig.getInstance().isMonogramAccount(account);
     }
 
+    public static void loadDirectoryUsers(int account) {
+        MonogramBackend.loadDirectory(org.telegram.messenger.ApplicationLoader.applicationContext,
+                new MonogramBackend.Callback<JSONArray>() {
+                    @Override
+                    public void onSuccess(JSONArray profiles) {
+                        ArrayList<TLRPC.User> users = new ArrayList<>();
+                        for (int i = 0; profiles != null && i < profiles.length(); i++) {
+                            try {
+                                TLRPC.User user = userFromProfile(account, profiles.getJSONObject(i));
+                                if (user != null) users.add(user);
+                            } catch (Exception ignore) {
+                            }
+                        }
+                        org.telegram.messenger.ContactsController.getInstance(account).addMonogramContacts(users);
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        org.telegram.messenger.FileLog.e("MONOGRAM directory load failed: " + error);
+                    }
+                });
+    }
+
     public static TLRPC.User userFromProfile(int account, JSONObject profile) {
         if (profile == null) return null;
         String backendId = profile.optString("user_id", "");
