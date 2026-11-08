@@ -140,7 +140,7 @@ public class MonogramAuthManager {
         user.username = username;
         user.phone = displayPhone;
         user.self = true;
-        user.flags |= 1024; // FLAG_10 = self
+        user.flags = 1024 | 2 | 4 | 8 | 16 | 64; // self, name, username, MONOGRAM number and status
 
         // MONOGRAM owner verification is stored in MONOGRAM metadata and
         // must not impersonate Telegram's official verification flag.
@@ -203,6 +203,33 @@ public class MonogramAuthManager {
                 users.add(finalUser);
                 ms.putUsersAndChats(users, null, true, true);
                 mc.putUser(finalUser, false);
+
+                if (avatarLocation != null) {
+                    try {
+                        File avatarFile = FileLoader.getInstance(currentAccount).getPathToAttach(avatarLocation, true);
+                        if (avatarFile != null && avatarFile.isFile()) {
+                            MonogramBackend.uploadMedia(ApplicationLoader.applicationContext, avatarFile, "image/jpeg",
+                                    new MonogramBackend.Callback<String>() {
+                                        @Override
+                                        public void onSuccess(String objectPath) {
+                                            try {
+                                                MonogramBackend.updateProfile(ApplicationLoader.applicationContext,
+                                                        new org.json.JSONObject().put("avatar_url", objectPath), null);
+                                            } catch (Exception e) {
+                                                FileLog.e(e);
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onError(String error) {
+                                            FileLog.e("MONOGRAM avatar upload failed: " + error);
+                                        }
+                                    });
+                        }
+                    } catch (Exception e) {
+                        FileLog.e(e);
+                    }
+                }
 
                 ContactsController.getInstance(currentAccount).checkAppAccount();
                 MonogramCloudBridge.loadDirectoryUsers(currentAccount);
@@ -269,8 +296,13 @@ public class MonogramAuthManager {
         user.status.expires = Integer.MAX_VALUE;
         user.photo = new TLRPC.TL_userProfilePhotoEmpty();
 
+        user.flags |= 2 | 4 | 8 | 16 | 64;
         userConfig.setCurrentUser(user);
         userConfig.saveConfig(true);
+        MessagesController.getInstance(account).putUser(user, false);
+        ArrayList<TLRPC.User> restoredUsers = new ArrayList<>();
+        restoredUsers.add(user);
+        MessagesStorage.getInstance(account).putUsersAndChats(restoredUsers, null, true, true);
         MonogramCloudBridge.loadDirectoryUsers(account);
         FileLog.d("MONOGRAM restored local profile " + activeUserId + " for account slot " + account);
         return true;
