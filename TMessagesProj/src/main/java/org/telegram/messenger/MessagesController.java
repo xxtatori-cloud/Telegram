@@ -11552,7 +11552,7 @@ public class MessagesController extends BaseController implements NotificationCe
     private void loadMessagesInternal(long dialogId, long mergeDialogId, boolean loadInfo, int count, int max_id, int offset_date, boolean fromCache, int minDate, int classGuid, int load_type, int last_message_id, int mode, long threadMessageId, int loadIndex, int first_unread, int unread_count, int last_date, boolean queryFromServer, int mentionsCount, boolean loadDialog, boolean processMessages, boolean isTopic, Timer loaderLogger, long hash) {
         if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
                 && mode == ChatActivity.MODE_DEFAULT && threadMessageId == 0 && !isTopic
-                && !DialogObject.isEncryptedDialog(dialogId) && dialogId > 0) {
+                && !DialogObject.isEncryptedDialog(dialogId) && dialogId != 0) {
             String cloudChatId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendChatId(dialogId);
             if (cloudChatId == null || cloudChatId.isEmpty()) {
                 String remotePeerId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendUserId(dialogId);
@@ -11609,8 +11609,13 @@ public class MessagesController extends BaseController implements NotificationCe
                                 TLRPC.TL_messages_messages response = new TLRPC.TL_messages_messages();
                                 response.messages.addAll(converted);
                                 response.count = converted.size();
-                                TLRPC.User peer = getUser(dialogId);
-                                if (peer != null) response.users.add(peer);
+                                if (dialogId > 0) {
+                                    TLRPC.User peer = getUser(dialogId);
+                                    if (peer != null) response.users.add(peer);
+                                } else {
+                                    TLRPC.Chat group = getChat(-dialogId);
+                                    if (group != null) response.chats.add(group);
+                                }
                                 if (!converted.isEmpty()) {
                                     getMessagesStorage().putMessages(response, dialogId, -1, 0, false, mode, threadMessageId);
                                 }
