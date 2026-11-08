@@ -4450,7 +4450,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 && sendMessageParams.game == null
                 && sendMessageParams.scheduleDate == 0
                 && sendMessageParams.scheduleRepeatPeriod == 0
-                && sendMessageParams.peer > 0) {
+                && sendMessageParams.peer != 0) {
             final long monogramDialogId = sendMessageParams.peer;
             org.telegram.messenger.monogram.MonogramCloudBridge.sendTextMessage(
                     currentAccount, monogramDialogId, sendMessageParams.message,
