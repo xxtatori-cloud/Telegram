@@ -11557,6 +11557,22 @@ public class MessagesController extends BaseController implements NotificationCe
             if (cloudChatId == null || cloudChatId.isEmpty()) {
                 getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
             } else {
+                org.telegram.messenger.monogram.MonogramRealtimeClient.subscribeOnce(
+                        org.telegram.messenger.ApplicationLoader.applicationContext,
+                        cloudChatId,
+                        new org.telegram.messenger.monogram.MonogramRealtimeClient.Listener() {
+                            @Override
+                            public void onMessage(org.telegram.messenger.monogram.MonogramBackend.Message cloudMessage) {
+                                ArrayList<TLRPC.Message> liveMessages = org.telegram.messenger.monogram.MonogramCloudBridge.convertMessages(
+                                        currentAccount, dialogId, java.util.Collections.singletonList(cloudMessage));
+                                org.telegram.messenger.monogram.MonogramCloudBridge.storeAndNotifyMessages(currentAccount, dialogId, liveMessages);
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                FileLog.e("MONOGRAM realtime: " + error);
+                            }
+                        });
                 org.telegram.messenger.monogram.MonogramBackend.loadMessages(
                         org.telegram.messenger.ApplicationLoader.applicationContext,
                         cloudChatId,
