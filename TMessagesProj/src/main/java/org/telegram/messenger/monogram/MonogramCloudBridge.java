@@ -157,6 +157,34 @@ public final class MonogramCloudBridge {
         return result;
     }
 
+    public static void sendTextMessage(int account, long dialogId, String body,
+                                       MonogramBackend.Callback<MonogramBackend.Message> callback) {
+        Context context = org.telegram.messenger.ApplicationLoader.applicationContext;
+        MonogramConfig config = MonogramConfig.getInstance();
+        String chatId = config.getBackendChatId(dialogId);
+        if (chatId != null && !chatId.isEmpty()) {
+            MonogramBackend.sendMessage(context, chatId, body, callback);
+            return;
+        }
+        String remotePeerId = config.getBackendUserId(dialogId);
+        if (remotePeerId == null || remotePeerId.isEmpty()) {
+            if (callback != null) callback.onError("This MONOGRAM chat is not linked to a cloud account yet.");
+            return;
+        }
+        MonogramBackend.createDirectChat(context, remotePeerId, new MonogramBackend.Callback<String>() {
+            @Override
+            public void onSuccess(String newChatId) {
+                config.setBackendChatId(dialogId, newChatId);
+                MonogramBackend.sendMessage(context, newChatId, body, callback);
+            }
+
+            @Override
+            public void onError(String message) {
+                if (callback != null) callback.onError(message);
+            }
+        });
+    }
+
     public static void storeAndNotifyMessages(int account, long dialogId, ArrayList<TLRPC.Message> messages) {
         if (messages == null || messages.isEmpty()) return;
         AndroidUtilities.runOnUIThread(() -> {
