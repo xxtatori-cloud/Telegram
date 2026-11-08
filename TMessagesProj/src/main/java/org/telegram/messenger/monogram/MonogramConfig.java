@@ -18,6 +18,7 @@ public class MonogramConfig {
     private static final String KEY_USERS = "registered_users";
     private static final String KEY_DEV_MODE = "dev_mode_enabled";
     private static final String KEY_ACTIVE_USER_ID_PREFIX = "active_local_user_id_";
+    private static final String KEY_BACKEND_CHAT_ID_PREFIX = "backend_chat_id_";
 
     private static volatile MonogramConfig instance;
     private final SharedPreferences preferences;
@@ -156,6 +157,38 @@ public class MonogramConfig {
             }
         }
         return null;
+    }
+
+    public synchronized String getBackendUserId(long localUserId) {
+        MonogramUserRecord record = getUserRecord(localUserId);
+        return record == null ? "" : (record.backendUserId == null ? "" : record.backendUserId);
+    }
+
+    public synchronized MonogramUserRecord getUserRecordByBackendId(String backendUserId) {
+        if (backendUserId == null || backendUserId.isEmpty()) return null;
+        for (MonogramUserRecord record : registeredUsers) {
+            if (backendUserId.equals(record.backendUserId)) {
+                MonogramUserRecord copy = new MonogramUserRecord(record.userId, record.firstName, record.lastName,
+                        record.username, record.phone, record.createdAt, record.isOwner);
+                copy.backendUserId = record.backendUserId;
+                return copy;
+            }
+        }
+        return null;
+    }
+
+    public synchronized void setBackendChatId(long dialogId, String chatId) {
+        if (dialogId == 0 || chatId == null || chatId.isEmpty()) return;
+        preferences.edit().putString(KEY_BACKEND_CHAT_ID_PREFIX + dialogId, chatId).apply();
+    }
+
+    public synchronized String getBackendChatId(long dialogId) {
+        return preferences.getString(KEY_BACKEND_CHAT_ID_PREFIX + dialogId, "");
+    }
+
+    public synchronized boolean isMonogramAccount(int account) {
+        long active = getActiveUserId(account);
+        return active != 0 && active == org.telegram.messenger.UserConfig.getInstance(account).getClientUserId();
     }
 
     public synchronized long getOwnerUserId() {
