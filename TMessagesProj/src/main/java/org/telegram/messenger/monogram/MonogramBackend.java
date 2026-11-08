@@ -207,6 +207,7 @@ public final class MonogramBackend {
                             userId = authUser == null ? userId : authUser.optString("id", userId);
                             saveSession(p, access, refresh, userId);
                             JSONObject profile = fetchProfile(access, userId);
+                            registerPendingDeviceToken(context);
                             deliverSuccess(callback, new Session(userId, access, refresh, profile));
                             return;
                         }
@@ -228,6 +229,7 @@ public final class MonogramBackend {
                 }
                 saveSession(p, newAccess, newRefresh, newUserId);
                 JSONObject profile = fetchProfile(newAccess, newUserId);
+                registerPendingDeviceToken(context);
                 deliverSuccess(callback, new Session(newUserId, newAccess, newRefresh, profile));
             } catch (Exception e) {
                 FileLog.e(e);
@@ -350,12 +352,24 @@ public final class MonogramBackend {
         });
     }
 
+    private static void registerPendingDeviceToken(Context context) {
+        String pending = prefs(context).getString("pending_fcm_token", "");
+        if (!pending.isEmpty()) {
+            prefs(context).edit().remove("pending_fcm_token").apply();
+            registerDeviceToken(context, pending);
+        }
+    }
+
     public static void registerDeviceToken(Context context, String fcmToken) {
         IO.execute(() -> {
             try {
                 String token = getAccessToken(context);
                 String userId = getCurrentUserId(context);
-                if (token.isEmpty() || userId.isEmpty() || fcmToken == null || fcmToken.isEmpty()) return;
+                if (fcmToken == null || fcmToken.isEmpty()) return;
+                if (token.isEmpty() || userId.isEmpty()) {
+                    prefs(context).edit().putString("pending_fcm_token", fcmToken).apply();
+                    return;
+                }
                 JSONObject payload = new JSONObject().put("user_id", userId)
                         .put("fcm_token", fcmToken).put("platform", "android")
                         .put("updated_at", java.time.Instant.now().toString());
@@ -363,6 +377,87 @@ public final class MonogramBackend {
                         payload, "resolution=merge-duplicates,return=minimal");
             } catch (Exception e) {
                 FileLog.e(e);
+            }
+        });
+    }
+
+    public static void loadChats(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id)"
+                        + "&chat_members.user_id=eq." + URLEncoder.encode(userId, "UTF-8")
+                        + "&order=created_at.desc";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void createGroupChat(Context context, String title, JSONArray memberIds, Callback<String> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/create_group_chat", token,
+                        new JSONObject().put("p_title", title).put("p_member_ids", memberIds), null);
+                String chatId = result.optString("_scalar", "");
+                if (chatId.isEmpty()) throw new IllegalStateException("Server did not return a group chat ID.");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(chatId));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void claimCollectibleUsername(Context context, String username, Callback<JSONObject> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/claim_collectible_username", token,
+                        new JSONObject().put("p_username", username), null);
+                if (callback != null) MAIN.post(() -> callback.onSuccess(result));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void equipGift(Context context, String giftId, Callback<JSONObject> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/equip_monogram_gift", token,
+                        new JSONObject().put("p_gift_id", giftId), null);
+                if (callback != null) MAIN.post(() -> callback.onSuccess(result));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void loadMyGifts(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                String path = "/rest/v1/user_gifts?select=id,gift_slug,serial_number,received_at,is_equipped,gift_catalog(title,asset_key)"
+                        + "&owner_id=eq." + URLEncoder.encode(userId, "UTF-8")
+                        + "&order=received_at.desc";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
             }
         });
     }
