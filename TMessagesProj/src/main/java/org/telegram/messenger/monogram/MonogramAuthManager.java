@@ -52,7 +52,8 @@ public class MonogramAuthManager {
     }
 
     /**
-     * Creates and activates a new MONOGRAM local development account.
+     * Creates or restores the real Supabase-backed MONOGRAM identity first,
+     * then installs the profile in the Telegram-derived local UI shell.
      */
     public static void createAccount(
             int currentAccount,
@@ -61,6 +62,51 @@ public class MonogramAuthManager {
             String username,
             String displayPhone,
             TLRPC.FileLocation avatarLocation,
+            AuthCallback callback
+    ) {
+        MonogramBackend.registerOrRestore(ApplicationLoader.applicationContext, firstName, lastName, username,
+                new MonogramBackend.Callback<MonogramBackend.Session>() {
+                    @Override
+                    public void onSuccess(MonogramBackend.Session session) {
+                        JSONObjectProfile profile = new JSONObjectProfile(session.profile);
+                        String serverFirst = profile.firstName.isEmpty() ? firstName : profile.firstName;
+                        String serverLast = profile.lastName.isEmpty() ? lastName : profile.lastName;
+                        String serverUsername = profile.username.isEmpty() ? session.getUsername() : profile.username;
+                        createLocalAccount(currentAccount, serverFirst, serverLast, serverUsername,
+                                displayPhone, avatarLocation, session.isOwner(), session.userId, callback);
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        if (callback != null) callback.onError(error);
+                    }
+                });
+    }
+
+    private static final class JSONObjectProfile {
+        final String firstName;
+        final String lastName;
+        final String username;
+        JSONObjectProfile(org.json.JSONObject json) {
+            firstName = json == null ? "" : json.optString("first_name", "");
+            lastName = json == null ? "" : json.optString("last_name", "");
+            username = json == null ? "" : json.optString("username", "");
+        }
+    }
+
+    /**
+     * Installs an already-authenticated Supabase profile in the Telegram-derived
+     * local UI model. This is not a Telegram MTProto session.
+     */
+    private static void createLocalAccount(
+            int currentAccount,
+            String firstName,
+            String lastName,
+            String username,
+            String displayPhone,
+            TLRPC.FileLocation avatarLocation,
+            boolean serverOwner,
+            String backendUserId,
             AuthCallback callback
     ) {
         if (firstName == null || firstName.trim().isEmpty()) {
@@ -79,7 +125,7 @@ public class MonogramAuthManager {
         MonogramConfig config = MonogramConfig.getInstance();
 
         // Check if this is the first MONOGRAM account ever created
-        boolean isOwner = !config.hasOwner();
+        boolean isOwner = serverOwner;
         if (isOwner) {
             config.setInitialOwnerIfNone(newUserId);
         }
@@ -93,11 +139,8 @@ public class MonogramAuthManager {
         user.self = true;
         user.flags |= 1024; // FLAG_10 = self
 
-        // Owner receives custom MONOGRAM verification badge
-        if (isOwner) {
-            user.verified = true;
-            user.flags |= 131072; // FLAG_17 = verified
-        }
+        // MONOGRAM owner verification is stored in MONOGRAM metadata and
+        // must not impersonate Telegram's official verification flag.
 
         // Apply Free Premium if enabled in MONOGRAM economy
         if (MonogramEconomy.getInstance().isPremiumEnabled()) {
@@ -130,6 +173,7 @@ public class MonogramAuthManager {
                 System.currentTimeMillis(),
                 isOwner
         );
+        record.backendUserId = backendUserId == null ? "" : backendUserId;
         config.registerUser(record);
 
         // Populate and activate in Telegram subsystems
@@ -211,10 +255,8 @@ public class MonogramAuthManager {
         user.phone = record.phone != null ? record.phone : "";
         user.self = true;
         user.flags |= 1024;
-        if (record.isOwner) {
-            user.verified = true;
-            user.flags |= 131072;
-        }
+        // The MONOGRAM owner badge is rendered by MONOGRAM UI, not Telegram's
+        // official verified flag.
         if (MonogramEconomy.getInstance().isPremiumEnabled()) {
             user.premium = true;
             user.flags |= 268435456;
