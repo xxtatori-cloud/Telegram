@@ -149,7 +149,7 @@ public class MonogramConfig {
     public synchronized MonogramUserRecord getUserRecord(long userId) {
         for (MonogramUserRecord record : registeredUsers) {
             if (record.userId == userId) {
-                return new MonogramUserRecord(record.userId, record.firstName, record.lastName,
+                MonogramUserRecord copy = new MonogramUserRecord(record.userId, record.firstName, record.lastName,
                         record.username, record.phone, record.createdAt, record.isOwner);
                 copy.backendUserId = record.backendUserId;
                 return copy;
