@@ -72,8 +72,9 @@ public class MonogramAuthManager {
                         String serverFirst = profile.firstName.isEmpty() ? firstName : profile.firstName;
                         String serverLast = profile.lastName.isEmpty() ? lastName : profile.lastName;
                         String serverUsername = profile.username.isEmpty() ? session.getUsername() : profile.username;
+                        String monogramNumber = profile.monogramNumber;
                         createLocalAccount(currentAccount, serverFirst, serverLast, serverUsername,
-                                displayPhone, avatarLocation, session.isOwner(), session.userId, callback);
+                                monogramNumber, avatarLocation, session.isOwner(), session.userId, callback);
                     }
 
                     @Override
@@ -87,10 +88,12 @@ public class MonogramAuthManager {
         final String firstName;
         final String lastName;
         final String username;
+        final String monogramNumber;
         JSONObjectProfile(org.json.JSONObject json) {
             firstName = json == null ? "" : json.optString("first_name", "");
             lastName = json == null ? "" : json.optString("last_name", "");
             username = json == null ? "" : json.optString("username", "");
+            monogramNumber = json == null ? "" : json.optString("monogram_number", "");
         }
     }
 
