@@ -84,7 +84,8 @@ public final class MonogramCloudBridge {
         user.last_name = record.lastName == null ? "" : record.lastName;
         user.username = record.username == null ? "" : record.username;
         user.self = user.id == UserConfig.getInstance(account).getClientUserId();
-        user.flags = 2 | 4 | 8 | 64;
+        user.phone = profile.optString("monogram_number", "");
+        user.flags = 2 | 4 | 8 | 64 | (user.phone.isEmpty() ? 0 : 16);
         if (user.self) user.flags |= 1024;
         if (profile.optBoolean("premium_enabled", true)) {
             user.premium = true;
@@ -117,6 +118,7 @@ public final class MonogramCloudBridge {
         message.unread = !outgoing;
         message.media_unread = false;
         message.flags = TLRPC.MESSAGE_FLAG_HAS_FROM_ID;
+        if (outgoing) message.flags |= 2;
         message.from_id = new TLRPC.TL_peerUser();
         message.from_id.user_id = outgoing ? selfId : peerId;
         message.peer_id = new TLRPC.TL_peerUser();
