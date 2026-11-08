@@ -119,6 +119,55 @@ create table if not exists public.messages (
     deleted_at timestamptz
 );
 
+create or replace function public.monogram_is_chat_member(p_chat_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $
+    select exists (
+        select 1 from public.chat_members
+        where chat_id = p_chat_id and user_id = auth.uid()
+    );
+$;
+
+create or replace function public.create_direct_chat(p_other_user_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, auth
+as $
+declare
+    v_chat_id uuid;
+begin
+    if auth.uid() is null or p_other_user_id is null or p_other_user_id = auth.uid() then
+        raise exception 'Invalid chat participants';
+    end if;
+
+    select c.id into v_chat_id
+    from public.chats c
+    where c.is_group = false
+      and exists (select 1 from public.chat_members a where a.chat_id = c.id and a.user_id = auth.uid())
+      and exists (select 1 from public.chat_members b where b.chat_id = c.id and b.user_id = p_other_user_id)
+      and (select count(*) from public.chat_members m where m.chat_id = c.id) = 2
+    limit 1;
+
+    if v_chat_id is not null then
+        return v_chat_id;
+    end if;
+
+    insert into public.chats(created_by, is_group)
+    values (auth.uid(), false)
+    returning id into v_chat_id;
+
+    insert into public.chat_members(chat_id, user_id)
+    values (v_chat_id, auth.uid()), (v_chat_id, p_other_user_id);
+
+    return v_chat_id;
+end;
+$;
+
 create index if not exists messages_chat_created_idx
 on public.messages(chat_id, created_at desc);
 
@@ -213,39 +262,21 @@ with check (
 
 create policy "Members can view their chats"
 on public.chats for select to authenticated
-using (
-    exists (
-        select 1 from public.chat_members m
-        where m.chat_id = chats.id and m.user_id = auth.uid()
-    )
-);
+using (public.monogram_is_chat_member(chats.id));
 
 create policy "Members can view chat membership"
 on public.chat_members for select to authenticated
-using (
-    exists (
-        select 1 from public.chat_members mine
-        where mine.chat_id = chat_members.chat_id and mine.user_id = auth.uid()
-    )
-);
+using (public.monogram_is_chat_member(chat_members.chat_id));
 
 create policy "Chat members can read messages"
 on public.messages for select to authenticated
-using (
-    exists (
-        select 1 from public.chat_members m
-        where m.chat_id = messages.chat_id and m.user_id = auth.uid()
-    )
-);
+using (public.monogram_is_chat_member(messages.chat_id));
 
 create policy "Chat members can send messages as themselves"
 on public.messages for insert to authenticated
 with check (
     sender_id = auth.uid()
-    and exists (
-        select 1 from public.chat_members m
-        where m.chat_id = messages.chat_id and m.user_id = auth.uid()
-    )
+    and public.monogram_is_chat_member(messages.chat_id)
 );
 
 create policy "Gift catalog is readable"
@@ -266,6 +297,7 @@ on public.profiles to authenticated;
 grant select on public.chats, public.chat_members, public.messages to authenticated;
 grant insert (chat_id, sender_id, body, media_url) on public.messages to authenticated;
 grant execute on function public.claim_monogram_gift(text) to authenticated;
+grant execute on function public.create_direct_chat(uuid) to authenticated;
 
 -- Enable Supabase Realtime for message updates.
 do $$
