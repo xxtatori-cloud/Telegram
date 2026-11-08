@@ -524,6 +524,26 @@ public final class MonogramBackend {
         });
     }
 
+    public static void createSignedMediaUrl(Context context, String objectPath, Callback<String> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                if (token.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                String encoded = objectPath == null ? "" : objectPath.replace("%", "%25").replace(" ", "%20");
+                JSONObject result = request("POST", "/storage/v1/object/sign/monogram-media/" + encoded,
+                        token, new JSONObject().put("expiresIn", 3600), null);
+                String signed = result.optString("signedURL", result.optString("signedUrl", ""));
+                if (signed.isEmpty()) throw new IllegalStateException("Supabase did not return a signed media URL.");
+                if (signed.startsWith("/")) signed = baseUrl() + "/storage/v1" + signed;
+                final String url = signed;
+                if (callback != null) MAIN.post(() -> callback.onSuccess(url));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
     public static void updateProfile(Context context, JSONObject changes, Callback<Boolean> callback) {
         IO.execute(() -> {
             try {
