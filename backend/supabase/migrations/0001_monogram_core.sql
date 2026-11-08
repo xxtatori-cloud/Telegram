@@ -295,6 +295,43 @@ grant insert (chat_id, sender_id, body, media_url) on public.messages to authent
 grant execute on function public.claim_monogram_gift(text) to authenticated;
 grant execute on function public.create_direct_chat(uuid) to authenticated;
 
+-- Private media storage. Object names must start with the authenticated user UUID.
+insert into storage.buckets(id, name, public)
+values ('monogram-media', 'monogram-media', false)
+on conflict (id) do nothing;
+
+create policy "MONOGRAM users upload their own media"
+on storage.objects for insert to authenticated
+with check (
+    bucket_id = 'monogram-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+create policy "MONOGRAM users read their own media"
+on storage.objects for select to authenticated
+using (
+    bucket_id = 'monogram-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+create policy "MONOGRAM users update their own media"
+on storage.objects for update to authenticated
+using (
+    bucket_id = 'monogram-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+    bucket_id = 'monogram-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+create policy "MONOGRAM users delete their own media"
+on storage.objects for delete to authenticated
+using (
+    bucket_id = 'monogram-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+);
+
 -- Enable Supabase Realtime for message updates.
 do $$
 begin
