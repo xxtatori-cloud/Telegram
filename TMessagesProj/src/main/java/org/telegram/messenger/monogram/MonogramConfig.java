@@ -33,6 +33,7 @@ public class MonogramConfig {
         public String phone;
         public long createdAt;
         public boolean isOwner;
+        public String backendUserId = "";
 
         public MonogramUserRecord() {}
 
@@ -56,6 +57,7 @@ public class MonogramConfig {
                 obj.put("phone", phone != null ? phone : "");
                 obj.put("createdAt", createdAt);
                 obj.put("isOwner", isOwner);
+                obj.put("backendUserId", backendUserId != null ? backendUserId : "");
             } catch (Exception e) {
                 FileLog.e(e);
             }
@@ -72,6 +74,7 @@ public class MonogramConfig {
             record.phone = obj.optString("phone", "");
             record.createdAt = obj.optLong("createdAt", System.currentTimeMillis());
             record.isOwner = obj.optBoolean("isOwner", false);
+            record.backendUserId = obj.optString("backendUserId", "");
             return record;
         }
     }
@@ -148,6 +151,8 @@ public class MonogramConfig {
             if (record.userId == userId) {
                 return new MonogramUserRecord(record.userId, record.firstName, record.lastName,
                         record.username, record.phone, record.createdAt, record.isOwner);
+                copy.backendUserId = record.backendUserId;
+                return copy;
             }
         }
         return null;
