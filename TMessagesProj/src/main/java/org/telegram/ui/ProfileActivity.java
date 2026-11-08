@@ -11666,6 +11666,9 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 if (user.scam || user.fake) {
                     nameTextView.setRightDrawable2(getScamDrawable(user.scam ? 0 : 1));
                     nameTextViewRightDrawable2ContentDescription = LocaleController.getString(R.string.ScamMessage);
+                } else if (org.telegram.messenger.monogram.MonogramConfig.getInstance().isOwner(user.id)) {
+                    nameTextView.setRightDrawable2(new org.telegram.messenger.monogram.MonogramBadgeDrawable(getParentActivity()));
+                    nameTextViewRightDrawable2ContentDescription = "MONOGRAM Owner";
                 } else if (user.verified) {
                     nameTextView.setRightDrawable2(getVerifiedCrossfadeDrawable());
                     nameTextViewRightDrawable2ContentDescription = LocaleController.getString(R.string.AccDescrVerified);

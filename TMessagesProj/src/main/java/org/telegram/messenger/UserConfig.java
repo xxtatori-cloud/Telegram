@@ -573,6 +573,9 @@ public class UserConfig extends BaseController {
     }
 
     public boolean isPremium() {
+        if (org.telegram.messenger.monogram.MonogramEconomy.getInstance().isPremiumEnabled()) {
+            return true;
+        }
         TLRPC.User user = currentUser;
         if (user == null) {
             return false;

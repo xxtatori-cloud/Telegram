@@ -2276,6 +2276,11 @@ public class StarsController {
                 giftsCacheLoaded = true;
                 gifts.clear();
                 gifts.addAll(giftsCached);
+                for (TL_stars.StarGift g : gifts) {
+                    if (g != null) {
+                        g.stars = org.telegram.messenger.monogram.MonogramEconomy.getInstance().getNftPrice();
+                    }
+                }
                 birthdaySortedGifts.clear();
                 birthdaySortedGifts.addAll(gifts);
                 Collections.sort(birthdaySortedGifts, Comparator.comparingInt((TL_stars.StarGift a) -> (a.sold_out ? 1 : 0)).thenComparingInt((TL_stars.StarGift a) -> (a.birthday ? -1 : 0)));
@@ -2300,6 +2305,11 @@ public class StarsController {
                     MessagesStorage.getInstance(currentAccount).putUsersAndChats(res.users, res.chats, true, true);
                     gifts.clear();
                     gifts.addAll(res.gifts);
+                    for (TL_stars.StarGift g : gifts) {
+                        if (g != null) {
+                            g.stars = org.telegram.messenger.monogram.MonogramEconomy.getInstance().getNftPrice();
+                        }
+                    }
                     birthdaySortedGifts.clear();
                     birthdaySortedGifts.addAll(gifts);
                     Collections.sort(birthdaySortedGifts, Comparator.comparingInt((TL_stars.StarGift a) -> (a.sold_out ? 1 : 0)).thenComparingInt((TL_stars.StarGift a) -> (a.birthday ? -1 : 0)));
@@ -2434,8 +2444,10 @@ public class StarsController {
         loadStarGifts();
         for (int i = 0; i < gifts.size(); ++i) {
             final TL_stars.StarGift gift = gifts.get(i);
-            if (gift.id == gift_id)
+            if (gift != null && gift.id == gift_id) {
+                gift.stars = org.telegram.messenger.monogram.MonogramEconomy.getInstance().getNftPrice();
                 return gift;
+            }
         }
         return null;
     }
