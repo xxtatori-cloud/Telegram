@@ -1,49 +1,112 @@
 
 name: MONOGRAM Android APK Build
 
+run-name: MONOGRAM APK - ${{ github.ref_name }}
+
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: monogram-android-build
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build MONOGRAM APK
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout repository
+      # 1. Download source code and all submodules
+      - name: Checkout MONOGRAM
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Set up Java 17
+      # 2. Install Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
+      # 3. Initialize Android SDK
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
+      # 4. Install exact dependencies required by Telegram
       - name: Install Android dependencies
+        shell: bash
         run: |
-          sdkmanager "platforms;android-36"
-          sdkmanager "build-tools;36.0.0"
-          sdkmanager "ndk;27.2.12479018"
-          sdkmanager "cmake;3.22.1"
+          set -euo pipefail
 
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      # 5. Verify Gradle wrapper
+      - name: Verify Gradle
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --version
+
+      # 6. Build actual standalone debug APK
       - name: Build MONOGRAM APK
+        shell: bash
         run: |
-          chmod +x gradlew
-          ./gradlew :TMessagesProj_AppStandalone:assembleAfatDebug --no-daemon --stacktrace
+          set -euo pipefail
 
+          ./gradlew \
+            :TMessagesProj_AppStandalone:assembleAfatDebug \
+            --no-daemon \
+            --no-parallel \
+            --max-workers=2 \
+            --stacktrace \
+            "-Dorg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+
+      # 7. Locate and prepare APK
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_PATH="TMessagesProj_AppStandalone/build/outputs/apk/afat/debug/app.apk"
+
+          echo "Checking APK output..."
+
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::Expected APK was not generated."
+
+            echo "Searching for generated APK files:"
+            find TMessagesProj_AppStandalone/build/outputs/apk \
+              -type f -name "*.apk" -print || true
+
+            exit 1
+          fi
+
+          mkdir -p artifacts
+
+          cp "$APK_PATH" artifacts/MONOGRAM-debug.apk
+
+          echo "APK successfully prepared:"
+          ls -lh artifacts/MONOGRAM-debug.apk
+
+      # 8. Upload APK to GitHub Actions
       - name: Upload MONOGRAM APK
         uses: actions/upload-artifact@v4
         with:
           name: MONOGRAM-APK
-          path: TMessagesProj_AppStandalone/build/outputs/apk/afat/debug/app.apk
+          path: artifacts/MONOGRAM-debug.apk
           if-no-files-found: error
           retention-days: 7
