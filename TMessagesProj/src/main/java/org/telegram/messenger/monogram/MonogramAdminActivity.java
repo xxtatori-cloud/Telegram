@@ -146,8 +146,7 @@ public class MonogramAdminActivity extends UniversalFragment {
 
         // 6. PREMIUM CONFIGURATION
         items.add(UItem.asHeader("6. Premium Configuration"));
-        items.add(UItem.asCheck(ID_PREMIUM_FREE_TOGGLE, "Free Premium Access").setChecked(economy.isPremiumEnabled()));
-        items.add(UItem.asButton(0, "Premium Status", economy.isPremiumEnabled() ? "Active (All features free of charge)" : "Disabled"));
+        items.add(UItem.asButton(0, "Premium Status", "Active • Free for every MONOGRAM account"));
         items.add(UItem.asShadow(null));
 
         // 7. APPLICATION INFORMATION
