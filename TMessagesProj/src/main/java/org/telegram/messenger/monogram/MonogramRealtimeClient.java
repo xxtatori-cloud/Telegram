@@ -14,12 +14,31 @@ import org.telegram.messenger.FileLog;
 import java.net.URLEncoder;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Supabase Realtime subscription for a single MONOGRAM chat. */
 public final class MonogramRealtimeClient extends WebSocketAdapter implements AutoCloseable {
     public interface Listener {
         void onMessage(MonogramBackend.Message message);
         void onError(String error);
+    }
+
+    private static final ConcurrentHashMap<String, MonogramRealtimeClient> ACTIVE = new ConcurrentHashMap<>();
+
+    public static void subscribeOnce(Context context, String chatId, Listener listener) {
+        if (chatId == null || chatId.isEmpty()) return;
+        MonogramRealtimeClient candidate = new MonogramRealtimeClient(context, chatId, listener);
+        MonogramRealtimeClient existing = ACTIVE.putIfAbsent(chatId, candidate);
+        if (existing == null) {
+            candidate.connect();
+        } else {
+            candidate.close();
+        }
+    }
+
+    public static void closeAll() {
+        for (MonogramRealtimeClient client : ACTIVE.values()) client.close();
+        ACTIVE.clear();
     }
 
     private final String chatId;
