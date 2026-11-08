@@ -39,10 +39,18 @@ public class MonogramEconomy {
     private MonogramEconomy() {
         Context context = ApplicationLoader.applicationContext;
         preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        nftPrice = preferences.getLong(KEY_NFT_PRICE, DEFAULT_NFT_PRICE);
-        premiumPrice = preferences.getLong(KEY_PREMIUM_PRICE, DEFAULT_PREMIUM_PRICE);
-        premiumEnabled = preferences.getBoolean(KEY_PREMIUM_ENABLED, DEFAULT_PREMIUM_ENABLED);
-        upgradeGiftPrice = preferences.getLong(KEY_UPGRADE_GIFT_PRICE, 0L);
+        // MONOGRAM's launch economy is intentionally free. Ignore legacy local
+        // prices so an older installation cannot accidentally retain paid prices.
+        nftPrice = DEFAULT_NFT_PRICE;
+        premiumPrice = DEFAULT_PREMIUM_PRICE;
+        premiumEnabled = DEFAULT_PREMIUM_ENABLED;
+        upgradeGiftPrice = 0L;
+        preferences.edit()
+                .putLong(KEY_NFT_PRICE, DEFAULT_NFT_PRICE)
+                .putLong(KEY_PREMIUM_PRICE, DEFAULT_PREMIUM_PRICE)
+                .putBoolean(KEY_PREMIUM_ENABLED, DEFAULT_PREMIUM_ENABLED)
+                .putLong(KEY_UPGRADE_GIFT_PRICE, 0L)
+                .apply();
     }
 
     public synchronized long getNftPrice() {
@@ -50,9 +58,8 @@ public class MonogramEconomy {
     }
 
     public synchronized void setNftPrice(long price) {
-        if (price < 0) price = 0;
-        this.nftPrice = price;
-        preferences.edit().putLong(KEY_NFT_PRICE, price).apply();
+        this.nftPrice = DEFAULT_NFT_PRICE;
+        preferences.edit().putLong(KEY_NFT_PRICE, DEFAULT_NFT_PRICE).apply();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.starGiftsLoaded);
     }
 
@@ -61,9 +68,8 @@ public class MonogramEconomy {
     }
 
     public synchronized void setPremiumPrice(long price) {
-        if (price < 0) price = 0;
-        this.premiumPrice = price;
-        preferences.edit().putLong(KEY_PREMIUM_PRICE, price).apply();
+        this.premiumPrice = DEFAULT_PREMIUM_PRICE;
+        preferences.edit().putLong(KEY_PREMIUM_PRICE, DEFAULT_PREMIUM_PRICE).apply();
     }
 
     public synchronized boolean isPremiumEnabled() {
@@ -71,8 +77,8 @@ public class MonogramEconomy {
     }
 
     public synchronized void setPremiumEnabled(boolean enabled) {
-        this.premiumEnabled = enabled;
-        preferences.edit().putBoolean(KEY_PREMIUM_ENABLED, enabled).apply();
+        this.premiumEnabled = DEFAULT_PREMIUM_ENABLED;
+        preferences.edit().putBoolean(KEY_PREMIUM_ENABLED, DEFAULT_PREMIUM_ENABLED).apply();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.currentUserPremiumStatusChanged);
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.premiumStatusChangedGlobal);
     }
@@ -82,9 +88,8 @@ public class MonogramEconomy {
     }
 
     public synchronized void setUpgradeGiftPrice(long price) {
-        if (price < 0) price = 0;
-        this.upgradeGiftPrice = price;
-        preferences.edit().putLong(KEY_UPGRADE_GIFT_PRICE, price).apply();
+        this.upgradeGiftPrice = 0L;
+        preferences.edit().putLong(KEY_UPGRADE_GIFT_PRICE, 0L).apply();
     }
 
     public synchronized void resetDefaults() {
