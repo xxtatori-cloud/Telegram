@@ -11555,7 +11555,33 @@ public class MessagesController extends BaseController implements NotificationCe
                 && !DialogObject.isEncryptedDialog(dialogId) && dialogId > 0) {
             String cloudChatId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendChatId(dialogId);
             if (cloudChatId == null || cloudChatId.isEmpty()) {
-                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                String remotePeerId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendUserId(dialogId);
+                if (remotePeerId != null && !remotePeerId.isEmpty()
+                        && dialogId != getUserConfig().getClientUserId()) {
+                    org.telegram.messenger.monogram.MonogramBackend.createDirectChat(
+                            org.telegram.messenger.ApplicationLoader.applicationContext,
+                            remotePeerId,
+                            new org.telegram.messenger.monogram.MonogramBackend.Callback<String>() {
+                                @Override
+                                public void onSuccess(String newChatId) {
+                                    org.telegram.messenger.monogram.MonogramConfig.getInstance().setBackendChatId(dialogId, newChatId);
+                                    loadMessagesInternal(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, false,
+                                            minDate, classGuid, load_type, last_message_id, mode, threadMessageId, loadIndex,
+                                            first_unread, unread_count, last_date, queryFromServer, mentionsCount,
+                                            loadDialog, processMessages, isTopic, loaderLogger, hash);
+                                }
+
+                                @Override
+                                public void onError(String error) {
+                                    FileLog.e("MONOGRAM direct chat creation failed: " + error);
+                                    getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date,
+                                            minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages,
+                                            isTopic, loaderLogger);
+                                }
+                            });
+                } else {
+                    getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                }
             } else {
                 org.telegram.messenger.monogram.MonogramRealtimeClient.subscribeOnce(
                         org.telegram.messenger.ApplicationLoader.applicationContext,
