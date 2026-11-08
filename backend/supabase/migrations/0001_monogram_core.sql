@@ -125,19 +125,19 @@ language sql
 stable
 security definer
 set search_path = public, auth
-as $
+as $$
     select exists (
         select 1 from public.chat_members
         where chat_id = p_chat_id and user_id = auth.uid()
     );
-$;
+$$;
 
 create or replace function public.create_direct_chat(p_other_user_id uuid)
 returns uuid
 language plpgsql
 security definer
 set search_path = public, auth
-as $
+as $$
 declare
     v_chat_id uuid;
 begin
@@ -166,7 +166,7 @@ begin
 
     return v_chat_id;
 end;
-$;
+$$;
 
 create index if not exists messages_chat_created_idx
 on public.messages(chat_id, created_at desc);
@@ -288,7 +288,7 @@ on public.monogram_instance for select to authenticated
 using (false);
 
 grant select on public.profiles, public.gift_catalog, public.user_gifts to authenticated;
-grant update (username, first_name, last_name, avatar_url, username_is_collectible, username_asset_id, customization, updated_at)
+grant update (username, first_name, last_name, avatar_url, customization, updated_at)
 on public.profiles to authenticated;
 grant select on public.chats, public.chat_members, public.messages to authenticated;
 grant insert (chat_id, sender_id, body, media_url) on public.messages to authenticated;
