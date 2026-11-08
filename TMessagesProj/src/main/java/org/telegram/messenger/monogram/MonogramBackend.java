@@ -569,6 +569,24 @@ public final class MonogramBackend {
         });
     }
 
+    public static void loadDirectory(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String selfId = getCurrentUserId(context);
+                String path = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,is_owner,premium_enabled"
+                        + "&user_id=neq." + URLEncoder.encode(selfId, "UTF-8")
+                        + "&order=username.asc&limit=100";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
     public static void searchProfiles(Context context, String query, Callback<JSONArray> callback) {
         IO.execute(() -> {
             try {
