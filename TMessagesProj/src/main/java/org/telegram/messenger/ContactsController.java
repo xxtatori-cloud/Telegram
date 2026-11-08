@@ -2411,6 +2411,34 @@ public class ContactsController extends BaseController {
         });
     }
 
+    public void addMonogramContacts(ArrayList<TLRPC.User> monogramUsers) {
+        if (monogramUsers == null || monogramUsers.isEmpty()) return;
+        AndroidUtilities.runOnUIThread(() -> {
+            boolean changed = false;
+            for (TLRPC.User user : monogramUsers) {
+                if (user == null || user.id == 0 || user.id == getUserConfig().getClientUserId()) continue;
+                boolean exists = false;
+                for (TLRPC.TL_contact contact : contacts) {
+                    if (contact.user_id == user.id) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    TLRPC.TL_contact contact = new TLRPC.TL_contact();
+                    contact.user_id = user.id;
+                    contact.mutual = true;
+                    contacts.add(contact);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                buildContactsSectionsArrays(true);
+                NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.contactsDidLoad);
+            }
+        });
+    }
+
     public void addContact(TLRPC.User user, boolean exception) {
         addContact(user, null, exception);
     }

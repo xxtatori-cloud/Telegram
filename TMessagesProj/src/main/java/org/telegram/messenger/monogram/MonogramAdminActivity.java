@@ -132,22 +132,21 @@ public class MonogramAdminActivity extends UniversalFragment {
 
         // 4. ECONOMY CONFIGURATION
         items.add(UItem.asHeader("4. Economy Configuration"));
-        items.add(UItem.asButton(ID_ECONOMY_NFT_PRICE, "NFT Star Price", economy.getNftPrice() + " Stars (Tap to change)"));
-        items.add(UItem.asButton(ID_ECONOMY_PREMIUM_PRICE, "Premium Star Price", economy.getPremiumPrice() + " Stars (Tap to change)"));
-        items.add(UItem.asCheck(ID_ECONOMY_PREMIUM_TOGGLE, "Enable Premium System").setChecked(economy.isPremiumEnabled()));
-        items.add(UItem.asButton(ID_ECONOMY_RESET, "Reset Economy to Defaults (0 Stars)", "Restores initial MONOGRAM economy"));
+        items.add(UItem.asButton(0, "NFT Gifts", "FREE • 0 Stars • 1,000,000 copies per design"));
+        items.add(UItem.asButton(0, "MONOGRAM Premium", "FREE • Always enabled"));
+        items.add(UItem.asButton(0, "Gift Upgrades", "FREE • 0 Stars"));
+        items.add(UItem.asButton(ID_ECONOMY_RESET, "Reset Economy", "Restores the free MONOGRAM economy"));
         items.add(UItem.asShadow(null));
 
         // 5. NFT GIFT CONFIGURATION
         items.add(UItem.asHeader("5. NFT Gift Configuration"));
-        items.add(UItem.asButton(ID_GIFT_PRICE_SET, "Gift Catalog Pricing", "Base Gift Price: " + economy.getNftPrice() + " Stars"));
-        items.add(UItem.asButton(ID_GIFT_UPGRADE_SET, "Gift Upgrade Pricing", "Upgrade Price: " + economy.getUpgradeGiftPrice() + " Stars (Tap to change)"));
+        items.add(UItem.asButton(0, "Gift Catalog", "All designs are free; supply limit is 1,000,000 per design"));
+        items.add(UItem.asButton(0, "Gift Upgrades", "All upgrades are free"));
         items.add(UItem.asShadow(null));
 
         // 6. PREMIUM CONFIGURATION
         items.add(UItem.asHeader("6. Premium Configuration"));
-        items.add(UItem.asCheck(ID_PREMIUM_FREE_TOGGLE, "Free Premium Access").setChecked(economy.isPremiumEnabled()));
-        items.add(UItem.asButton(0, "Premium Status", economy.isPremiumEnabled() ? "Active (All features free of charge)" : "Disabled"));
+        items.add(UItem.asButton(0, "Premium Status", "Active • Free for every MONOGRAM account"));
         items.add(UItem.asShadow(null));
 
         // 7. APPLICATION INFORMATION
@@ -168,48 +167,6 @@ public class MonogramAdminActivity extends UniversalFragment {
         MonogramConfig config = MonogramConfig.getInstance();
 
         switch (item.id) {
-            case ID_ECONOMY_NFT_PRICE:
-            case ID_GIFT_PRICE_SET:
-                showPriceInputDialog("Set NFT Gift Price (Stars)", economy.getNftPrice(), newPrice -> {
-                    economy.setNftPrice(newPrice);
-                    if (listView != null && listView.adapter != null) {
-                        listView.adapter.update(true);
-                    }
-                    showToast("NFT Gift price set to " + newPrice + " Stars");
-                });
-                break;
-
-            case ID_ECONOMY_PREMIUM_PRICE:
-                showPriceInputDialog("Set Premium Price (Stars)", economy.getPremiumPrice(), newPrice -> {
-                    economy.setPremiumPrice(newPrice);
-                    if (listView != null && listView.adapter != null) {
-                        listView.adapter.update(true);
-                    }
-                    showToast("Premium price set to " + newPrice + " Stars");
-                });
-                break;
-
-            case ID_GIFT_UPGRADE_SET:
-                showPriceInputDialog("Set Gift Upgrade Price (Stars)", economy.getUpgradeGiftPrice(), newPrice -> {
-                    economy.setUpgradeGiftPrice(newPrice);
-                    if (listView != null && listView.adapter != null) {
-                        listView.adapter.update(true);
-                    }
-                    showToast("Gift upgrade price set to " + newPrice + " Stars");
-                });
-                break;
-
-            case ID_ECONOMY_PREMIUM_TOGGLE:
-            case ID_PREMIUM_FREE_TOGGLE:
-                boolean newEnabled = !economy.isPremiumEnabled();
-                economy.setPremiumEnabled(newEnabled);
-                UserConfig.getInstance(currentAccount).saveConfig(false);
-                if (listView != null && listView.adapter != null) {
-                    listView.adapter.update(true);
-                }
-                showToast("Premium access: " + (newEnabled ? "Enabled (Free)" : "Disabled"));
-                break;
-
             case ID_ECONOMY_RESET:
                 economy.resetDefaults();
                 if (listView != null && listView.adapter != null) {

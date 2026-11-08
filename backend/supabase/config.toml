@@ -1,0 +1,13 @@
+project_id = "monogram"
+
+[auth]
+enabled = true
+enable_signup = true
+enable_anonymous_sign_ins = true
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[functions.send-monogram-push]
+verify_jwt = false

@@ -52,7 +52,8 @@ public class MonogramAuthManager {
     }
 
     /**
-     * Creates and activates a new MONOGRAM local development account.
+     * Creates or restores the real Supabase-backed MONOGRAM identity first,
+     * then installs the profile in the Telegram-derived local UI shell.
      */
     public static void createAccount(
             int currentAccount,
@@ -61,6 +62,54 @@ public class MonogramAuthManager {
             String username,
             String displayPhone,
             TLRPC.FileLocation avatarLocation,
+            AuthCallback callback
+    ) {
+        MonogramBackend.registerOrRestore(ApplicationLoader.applicationContext, firstName, lastName, username,
+                new MonogramBackend.Callback<MonogramBackend.Session>() {
+                    @Override
+                    public void onSuccess(MonogramBackend.Session session) {
+                        JSONObjectProfile profile = new JSONObjectProfile(session.profile);
+                        String serverFirst = profile.firstName.isEmpty() ? firstName : profile.firstName;
+                        String serverLast = profile.lastName.isEmpty() ? lastName : profile.lastName;
+                        String serverUsername = profile.username.isEmpty() ? session.getUsername() : profile.username;
+                        String monogramNumber = profile.monogramNumber;
+                        createLocalAccount(currentAccount, serverFirst, serverLast, serverUsername,
+                                monogramNumber, avatarLocation, session.isOwner(), session.userId, callback);
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        if (callback != null) callback.onError(error);
+                    }
+                });
+    }
+
+    private static final class JSONObjectProfile {
+        final String firstName;
+        final String lastName;
+        final String username;
+        final String monogramNumber;
+        JSONObjectProfile(org.json.JSONObject json) {
+            firstName = json == null ? "" : json.optString("first_name", "");
+            lastName = json == null ? "" : json.optString("last_name", "");
+            username = json == null ? "" : json.optString("username", "");
+            monogramNumber = json == null ? "" : json.optString("monogram_number", "");
+        }
+    }
+
+    /**
+     * Installs an already-authenticated Supabase profile in the Telegram-derived
+     * local UI model. This is not a Telegram MTProto session.
+     */
+    private static void createLocalAccount(
+            int currentAccount,
+            String firstName,
+            String lastName,
+            String username,
+            String displayPhone,
+            TLRPC.FileLocation avatarLocation,
+            boolean serverOwner,
+            String backendUserId,
             AuthCallback callback
     ) {
         if (firstName == null || firstName.trim().isEmpty()) {
@@ -73,15 +122,15 @@ public class MonogramAuthManager {
         firstName = firstName.trim();
         lastName = lastName != null ? lastName.trim() : "";
         username = username != null ? username.trim().replace("@", "") : "";
-        displayPhone = displayPhone != null ? displayPhone.trim().replaceAll("[^0-9+]", "") : "";
+        displayPhone = displayPhone != null ? displayPhone.trim().replaceAll("[^A-Za-z0-9+_-]", "") : "";
 
         long newUserId = generateUniqueUserId();
         MonogramConfig config = MonogramConfig.getInstance();
 
         // Check if this is the first MONOGRAM account ever created
-        boolean isOwner = !config.hasOwner();
+        boolean isOwner = serverOwner;
         if (isOwner) {
-            config.setInitialOwnerIfNone(newUserId);
+            config.setOwnerUserId(newUserId);
         }
 
         TLRPC.TL_user user = new TLRPC.TL_user();
@@ -91,13 +140,10 @@ public class MonogramAuthManager {
         user.username = username;
         user.phone = displayPhone;
         user.self = true;
-        user.flags |= 1024; // FLAG_10 = self
+        user.flags = 1024 | 2 | 4 | 8 | 16 | 64; // self, name, username, MONOGRAM number and status
 
-        // Owner receives custom MONOGRAM verification badge
-        if (isOwner) {
-            user.verified = true;
-            user.flags |= 131072; // FLAG_17 = verified
-        }
+        // MONOGRAM owner verification is stored in MONOGRAM metadata and
+        // must not impersonate Telegram's official verification flag.
 
         // Apply Free Premium if enabled in MONOGRAM economy
         if (MonogramEconomy.getInstance().isPremiumEnabled()) {
@@ -130,6 +176,7 @@ public class MonogramAuthManager {
                 System.currentTimeMillis(),
                 isOwner
         );
+        record.backendUserId = backendUserId == null ? "" : backendUserId;
         config.registerUser(record);
 
         // Populate and activate in Telegram subsystems
@@ -142,11 +189,13 @@ public class MonogramAuthManager {
                 UserConfig uc = UserConfig.getInstance(currentAccount);
                 MessagesStorage ms = MessagesStorage.getInstance(currentAccount);
 
-                mc.cleanup();
+                // Reset the account slot once before installing the new local profile.
+                // The previous double cleanup needlessly reset controller state twice.
                 uc.clearConfig();
                 mc.cleanup();
 
                 uc.setCurrentUser(finalUser);
+                config.setActiveUserId(currentAccount, finalUser.id);
                 uc.saveConfig(true);
 
                 ms.cleanup(true);
@@ -155,7 +204,35 @@ public class MonogramAuthManager {
                 ms.putUsersAndChats(users, null, true, true);
                 mc.putUser(finalUser, false);
 
+                if (avatarLocation != null) {
+                    try {
+                        File avatarFile = FileLoader.getInstance(currentAccount).getPathToAttach(avatarLocation, true);
+                        if (avatarFile != null && avatarFile.isFile()) {
+                            MonogramBackend.uploadMedia(ApplicationLoader.applicationContext, avatarFile, "image/jpeg",
+                                    new MonogramBackend.Callback<String>() {
+                                        @Override
+                                        public void onSuccess(String objectPath) {
+                                            try {
+                                                MonogramBackend.updateProfile(ApplicationLoader.applicationContext,
+                                                        new org.json.JSONObject().put("avatar_url", objectPath), null);
+                                            } catch (Exception e) {
+                                                FileLog.e(e);
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onError(String error) {
+                                            FileLog.e("MONOGRAM avatar upload failed: " + error);
+                                        }
+                                    });
+                        }
+                    } catch (Exception e) {
+                        FileLog.e(e);
+                    }
+                }
+
                 ContactsController.getInstance(currentAccount).checkAppAccount();
+                MonogramCloudBridge.loadDirectoryUsers(currentAccount);
                 mc.loadAppConfig();
                 mc.putDialogsEndReachedAfterRegistration();
                 MediaDataController.getInstance(currentAccount).loadStickersByEmojiOrName(
@@ -176,6 +253,59 @@ public class MonogramAuthManager {
                 }
             }
         });
+    }
+
+    /**
+     * Restores a local MONOGRAM profile when Telegram's deferred UserConfig write was
+     * interrupted by process death. This restores only the local profile; it does not
+     * create or impersonate a Telegram server session.
+     */
+    public static boolean restoreLocalAccountIfNeeded(int account) {
+        UserConfig userConfig = UserConfig.getInstance(account);
+        if (userConfig.isClientActivated()) {
+            return false;
+        }
+
+        MonogramConfig config = MonogramConfig.getInstance();
+        long activeUserId = config.getActiveUserId(account);
+        if (activeUserId == 0) {
+            return false;
+        }
+
+        MonogramConfig.MonogramUserRecord record = config.getUserRecord(activeUserId);
+        if (record == null) {
+            config.clearActiveUserId(account);
+            return false;
+        }
+
+        TLRPC.TL_user user = new TLRPC.TL_user();
+        user.id = record.userId;
+        user.first_name = record.firstName != null ? record.firstName : "";
+        user.last_name = record.lastName != null ? record.lastName : "";
+        user.username = record.username != null ? record.username : "";
+        user.phone = record.phone != null ? record.phone : "";
+        user.self = true;
+        user.flags |= 1024;
+        // The MONOGRAM owner badge is rendered by MONOGRAM UI, not Telegram's
+        // official verified flag.
+        if (MonogramEconomy.getInstance().isPremiumEnabled()) {
+            user.premium = true;
+            user.flags |= 268435456;
+        }
+        user.status = new TLRPC.TL_userStatusOnline();
+        user.status.expires = Integer.MAX_VALUE;
+        user.photo = new TLRPC.TL_userProfilePhotoEmpty();
+
+        user.flags |= 2 | 4 | 8 | 16 | 64;
+        userConfig.setCurrentUser(user);
+        userConfig.saveConfig(true);
+        MessagesController.getInstance(account).putUser(user, false);
+        ArrayList<TLRPC.User> restoredUsers = new ArrayList<>();
+        restoredUsers.add(user);
+        MessagesStorage.getInstance(account).putUsersAndChats(restoredUsers, null, true, true);
+        MonogramCloudBridge.loadDirectoryUsers(account);
+        FileLog.d("MONOGRAM restored local profile " + activeUserId + " for account slot " + account);
+        return true;
     }
 
     /**

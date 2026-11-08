@@ -460,6 +460,11 @@ public class UserConfig extends BaseController {
     }
 
     public void clearConfig() {
+        // A cleared account slot must not be silently reactivated from the local
+        // MONOGRAM recovery registry on the next process start.
+        if (ApplicationLoader.applicationContext != null) {
+            org.telegram.messenger.monogram.MonogramConfig.getInstance().clearActiveUserId(currentAccount);
+        }
         getPreferences().edit().clear().apply();
 
         sharingMyLocationUntil = 0;

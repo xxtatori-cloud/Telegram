@@ -1,0 +1,659 @@
+package org.telegram.messenger.monogram;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.telegram.messenger.BuildConfig;
+import org.telegram.messenger.FileLog;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Supabase client for MONOGRAM.
+ *
+ * Uses only the public anon/publishable key in the APK. All authorization is
+ * enforced by Postgres RLS; never place a service-role key in this application.
+ */
+public final class MonogramBackend {
+    private static final String PREFS = "monogram_backend_session";
+    private static final String ACCESS = "access_token";
+    private static final String REFRESH = "refresh_token";
+    private static final String USER_ID = "user_id";
+    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    private MonogramBackend() {}
+
+    public interface Callback<T> {
+        void onSuccess(T value);
+        void onError(String message);
+    }
+
+    public static final class Session {
+        public final String userId;
+        public final String accessToken;
+        public final String refreshToken;
+        public final JSONObject profile;
+
+        Session(String userId, String accessToken, String refreshToken, JSONObject profile) {
+            this.userId = userId;
+            this.accessToken = accessToken;
+            this.refreshToken = refreshToken;
+            this.profile = profile;
+        }
+
+        public boolean isOwner() {
+            return profile != null && profile.optBoolean("is_owner", false);
+        }
+
+        public String getUsername() {
+            return profile == null ? "" : profile.optString("username", "");
+        }
+
+        public String getMonogramNumber() {
+            return profile == null ? "" : profile.optString("monogram_number", "");
+        }
+    }
+
+    public static final class Message {
+        public final String id;
+        public final String chatId;
+        public final String senderId;
+        public final String body;
+        public final String createdAt;
+
+        Message(JSONObject json) {
+            id = json.optString("id", "");
+            chatId = json.optString("chat_id", "");
+            senderId = json.optString("sender_id", "");
+            body = json.optString("body", "");
+            createdAt = json.optString("created_at", "");
+        }
+    }
+
+    public static boolean isConfigured() {
+        return BuildConfig.MONOGRAM_SUPABASE_URL != null
+                && !BuildConfig.MONOGRAM_SUPABASE_URL.trim().isEmpty()
+                && BuildConfig.MONOGRAM_SUPABASE_ANON_KEY != null
+                && !BuildConfig.MONOGRAM_SUPABASE_ANON_KEY.trim().isEmpty();
+    }
+
+    private static String baseUrl() {
+        return BuildConfig.MONOGRAM_SUPABASE_URL.replaceAll("/+$", "");
+    }
+
+    private static String apiKey() {
+        return BuildConfig.MONOGRAM_SUPABASE_ANON_KEY;
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static void deliverError(Callback<?> callback, String message) {
+        if (callback != null) MAIN.post(() -> callback.onError(message));
+    }
+
+    private static void deliverSuccess(Callback<Session> callback, Session value) {
+        if (callback != null) MAIN.post(() -> callback.onSuccess(value));
+    }
+
+    private static JSONObject request(String method, String path, String bearer, JSONObject body, String prefer) throws Exception {
+        if ("PATCH".equalsIgnoreCase(method)) {
+            return patchRequest(path, bearer, body, prefer);
+        }
+        if (!isConfigured()) {
+            throw new IllegalStateException("MONOGRAM backend is not configured. Set MONOGRAM_SUPABASE_URL and MONOGRAM_SUPABASE_ANON_KEY.");
+        }
+        URL url = new URL(baseUrl() + path);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(20000);
+        connection.setRequestProperty("apikey", apiKey());
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("Authorization", "Bearer " + (bearer == null || bearer.isEmpty() ? apiKey() : bearer));
+        if (prefer != null && !prefer.isEmpty()) connection.setRequestProperty("Prefer", prefer);
+        if (body != null) {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(bytes);
+            }
+        }
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
+        StringBuilder response = new StringBuilder();
+        if (stream != null) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) response.append(line);
+            }
+        }
+        connection.disconnect();
+        String raw = response.toString();
+        if (status < 200 || status >= 300) {
+            String message = raw;
+            try {
+                JSONObject error = new JSONObject(raw);
+                message = error.optString("msg", error.optString("message", error.optString("error_description", raw)));
+            } catch (Exception ignore) {}
+            throw new IllegalStateException("MONOGRAM server (" + status + "): " + message);
+        }
+        if (raw.isEmpty()) return new JSONObject();
+        if (raw.startsWith("\"") || raw.equals("true") || raw.equals("false") || raw.matches("-?[0-9]+")) {
+            JSONObject wrapper = new JSONObject();
+            wrapper.put("_scalar", new org.json.JSONTokener(raw).nextValue().toString());
+            return wrapper;
+        }
+        if (raw.startsWith("[")) {
+            JSONObject wrapper = new JSONObject();
+            wrapper.put("_array", new JSONArray(raw));
+            return wrapper;
+        }
+        return new JSONObject(raw);
+    }
+
+    private static JSONObject patchRequest(String path, String bearer, JSONObject body, String prefer) throws Exception {
+        if (!isConfigured()) throw new IllegalStateException("MONOGRAM backend is not configured.");
+        okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        okhttp3.RequestBody requestBody = okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("application/json; charset=utf-8"),
+                body == null ? "{}" : body.toString());
+        okhttp3.Request.Builder builder = new okhttp3.Request.Builder()
+                .url(baseUrl() + path)
+                .patch(requestBody)
+                .header("apikey", apiKey())
+                .header("Authorization", "Bearer " + (bearer == null || bearer.isEmpty() ? apiKey() : bearer))
+                .header("Accept", "application/json");
+        if (prefer != null && !prefer.isEmpty()) builder.header("Prefer", prefer);
+        try (okhttp3.Response response = client.newCall(builder.build()).execute()) {
+            String raw = response.body() == null ? "" : response.body().string();
+            if (!response.isSuccessful()) {
+                String message = raw;
+                try {
+                    JSONObject error = new JSONObject(raw);
+                    message = error.optString("message", error.optString("details", raw));
+                } catch (Exception ignore) {}
+                throw new IllegalStateException("MONOGRAM server (" + response.code() + "): " + message);
+            }
+            return raw.isEmpty() ? new JSONObject() : new JSONObject(raw);
+        }
+    }
+
+    private static String cleanUsername(String value, String userId) {
+        String cleaned = value == null ? "" : value.trim().replace("@", "").replaceAll("[^A-Za-z0-9_]", "");
+        if (cleaned.length() < 5) {
+            String suffix = userId == null ? Long.toHexString(System.nanoTime()) : userId.replace("-", "");
+            cleaned = "user_" + suffix.substring(0, Math.min(12, suffix.length()));
+        }
+        if (cleaned.length() > 32) cleaned = cleaned.substring(0, 32);
+        return cleaned;
+    }
+
+    /**
+     * Restores the persisted Supabase session, or creates an anonymous MONOGRAM
+     * account. The database trigger creates the profile and atomically assigns
+     * the first account as owner.
+     */
+    public static void registerOrRestore(Context context, String firstName, String lastName,
+                                         String requestedUsername, Callback<Session> callback) {
+        IO.execute(() -> {
+            try {
+                if (!isConfigured()) throw new IllegalStateException(
+                        "Supabase is not configured for this build. Add the MONOGRAM Supabase URL and anon key.");
+                SharedPreferences p = prefs(context);
+                String access = p.getString(ACCESS, "");
+                String refresh = p.getString(REFRESH, "");
+                String userId = p.getString(USER_ID, "");
+
+                if (!access.isEmpty() && !userId.isEmpty()) {
+                    try {
+                        JSONObject profile = fetchProfile(access, userId);
+                        registerPendingDeviceToken(context);
+                        Session session = new Session(userId, access, refresh, profile);
+                        deliverSuccess(callback, session);
+                        return;
+                    } catch (Exception expired) {
+                        if (!refresh.isEmpty()) {
+                            JSONObject renewed = request("POST", "/auth/v1/token?grant_type=refresh_token", null,
+                                    new JSONObject().put("refresh_token", refresh), null);
+                            access = renewed.optString("access_token", "");
+                            refresh = renewed.optString("refresh_token", refresh);
+                            JSONObject authUser = renewed.optJSONObject("user");
+                            userId = authUser == null ? userId : authUser.optString("id", userId);
+                            saveSession(p, access, refresh, userId);
+                            JSONObject profile = fetchProfile(access, userId);
+                            registerPendingDeviceToken(context);
+                            deliverSuccess(callback, new Session(userId, access, refresh, profile));
+                            return;
+                        }
+                    }
+                }
+
+                JSONObject metadata = new JSONObject();
+                metadata.put("first_name", firstName == null ? "" : firstName.trim());
+                metadata.put("last_name", lastName == null ? "" : lastName.trim());
+                metadata.put("username", cleanUsername(requestedUsername, null));
+                JSONObject signup = new JSONObject().put("data", metadata);
+                JSONObject auth = request("POST", "/auth/v1/signup", null, signup, null);
+                String newAccess = auth.optString("access_token", "");
+                String newRefresh = auth.optString("refresh_token", "");
+                JSONObject authUser = auth.optJSONObject("user");
+                String newUserId = authUser == null ? "" : authUser.optString("id", "");
+                if (newAccess.isEmpty() || newUserId.isEmpty()) {
+                    throw new IllegalStateException("Supabase did not return an anonymous session. Check that Anonymous Sign-Ins are enabled.");
+                }
+                saveSession(p, newAccess, newRefresh, newUserId);
+                JSONObject profile = fetchProfile(newAccess, newUserId);
+                registerPendingDeviceToken(context);
+                deliverSuccess(callback, new Session(newUserId, newAccess, newRefresh, profile));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage() == null ? "MONOGRAM registration failed" : e.getMessage());
+            }
+        });
+    }
+
+    private static void saveSession(SharedPreferences p, String access, String refresh, String userId) {
+        p.edit().putString(ACCESS, access).putString(REFRESH, refresh).putString(USER_ID, userId).commit();
+    }
+
+    private static JSONObject fetchProfile(String token, String userId) throws Exception {
+        String path = "/rest/v1/profiles?select=*&user_id=eq." + URLEncoder.encode(userId, "UTF-8");
+        JSONObject result = request("GET", path, token, null, null);
+        JSONArray rows = result.optJSONArray("_array");
+        if (rows == null || rows.length() == 0) {
+            throw new IllegalStateException("MONOGRAM profile was not created by the database trigger. Apply the backend migration.");
+        }
+        return rows.getJSONObject(0);
+    }
+
+    public static void signOut(Context context) {
+        prefs(context).edit().clear().commit();
+    }
+
+    public static String getCurrentUserId(Context context) {
+        return prefs(context).getString(USER_ID, "");
+    }
+
+    public static String getAccessToken(Context context) {
+        return prefs(context).getString(ACCESS, "");
+    }
+
+    public static void createDirectChat(Context context, String otherUserId, Callback<String> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                if (token.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                JSONObject result = request("POST", "/rest/v1/rpc/create_direct_chat", token,
+                        new JSONObject().put("p_other_user_id", otherUserId), null);
+                String chatId = result.optString("_array", "");
+                if (chatId.isEmpty()) chatId = result.optString("id", result.toString().replace("\"", ""));
+                final String value = chatId;
+                if (callback != null) MAIN.post(() -> callback.onSuccess(value));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void sendMessage(Context context, String chatId, String body, Callback<Message> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                if (body == null || body.trim().isEmpty()) throw new IllegalArgumentException("Message is empty.");
+                JSONObject payload = new JSONObject().put("chat_id", chatId)
+                        .put("sender_id", userId).put("body", body.trim());
+                JSONObject result = request("POST", "/rest/v1/messages?select=id,chat_id,sender_id,body,created_at",
+                        token, payload, "return=representation");
+                JSONArray rows = result.optJSONArray("_array");
+                if (rows == null || rows.length() == 0) throw new IllegalStateException("Server did not save the message.");
+                Message message = new Message(rows.getJSONObject(0));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(message));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void loadMessages(Context context, String chatId, Callback<java.util.List<Message>> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String path = "/rest/v1/messages?select=id,chat_id,sender_id,body,created_at"
+                        + "&chat_id=eq." + URLEncoder.encode(chatId, "UTF-8")
+                        + "&deleted_at=is.null&order=created_at.asc&limit=200";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                java.util.ArrayList<Message> messages = new java.util.ArrayList<>();
+                if (rows != null) for (int i = 0; i < rows.length(); i++) messages.add(new Message(rows.getJSONObject(i)));
+                if (callback != null) MAIN.post(() -> callback.onSuccess(messages));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void loadGiftCatalog(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("GET", "/rest/v1/gift_catalog?select=slug,title,asset_key,supply_limit,next_serial,price_stars&enabled=eq.true&order=title.asc",
+                        token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void claimGift(Context context, String slug, Callback<JSONObject> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/claim_monogram_gift", token,
+                        new JSONObject().put("p_slug", slug), null);
+                MAIN.post(() -> callback.onSuccess(result));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    private static void registerPendingDeviceToken(Context context) {
+        String pending = prefs(context).getString("pending_fcm_token", "");
+        if (!pending.isEmpty()) {
+            prefs(context).edit().remove("pending_fcm_token").apply();
+            registerDeviceToken(context, pending);
+        }
+    }
+
+    public static void registerDeviceToken(Context context, String fcmToken) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (fcmToken == null || fcmToken.isEmpty()) return;
+                if (token.isEmpty() || userId.isEmpty()) {
+                    prefs(context).edit().putString("pending_fcm_token", fcmToken).apply();
+                    return;
+                }
+                JSONObject payload = new JSONObject().put("user_id", userId)
+                        .put("fcm_token", fcmToken).put("platform", "android")
+                        .put("updated_at", java.time.Instant.now().toString());
+                request("POST", "/rest/v1/device_tokens?on_conflict=fcm_token", token,
+                        payload, "resolution=merge-duplicates,return=minimal");
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
+    public static void loadChats(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id),membership_filter:chat_members!inner(user_id),messages(id,chat_id,sender_id,body,created_at)"
+                        + "&membership_filter.user_id=eq." + URLEncoder.encode(userId, "UTF-8")
+                        + "&messages.order=created_at.desc&messages.limit=1&order=created_at.desc";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (rows == null) rows = new JSONArray();
+
+                java.util.LinkedHashSet<String> memberIds = new java.util.LinkedHashSet<>();
+                for (int i = 0; i < rows.length(); i++) {
+                    JSONArray members = rows.getJSONObject(i).optJSONArray("chat_members");
+                    if (members == null) continue;
+                    for (int j = 0; j < members.length(); j++) {
+                        String memberId = members.getJSONObject(j).optString("user_id", "");
+                        if (!memberId.isEmpty() && !memberId.equals(userId)) memberIds.add(memberId);
+                    }
+                }
+                if (!memberIds.isEmpty()) {
+                    String inFilter = "in.(" + android.text.TextUtils.join(",", memberIds) + ")";
+                    String profilesPath = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,monogram_number,is_owner,premium_enabled"
+                            + "&user_id=" + URLEncoder.encode(inFilter, "UTF-8");
+                    JSONObject profilesResult = request("GET", profilesPath, token, null, null);
+                    JSONArray profiles = profilesResult.optJSONArray("_array");
+                    java.util.HashMap<String, JSONObject> profilesById = new java.util.HashMap<>();
+                    if (profiles != null) {
+                        for (int i = 0; i < profiles.length(); i++) {
+                            JSONObject profile = profiles.getJSONObject(i);
+                            profilesById.put(profile.optString("user_id", ""), profile);
+                        }
+                    }
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONObject chat = rows.getJSONObject(i);
+                        JSONArray rawMembers = chat.optJSONArray("chat_members");
+                        JSONArray enriched = new JSONArray();
+                        if (rawMembers != null) {
+                            for (int j = 0; j < rawMembers.length(); j++) {
+                                JSONObject member = rawMembers.getJSONObject(j);
+                                JSONObject profile = profilesById.get(member.optString("user_id", ""));
+                                if (profile != null) enriched.put(profile);
+                            }
+                        }
+                        chat.put("members", enriched);
+                    }
+                }
+                final JSONArray finalRows = rows;
+                if (callback != null) MAIN.post(() -> callback.onSuccess(finalRows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void sendDirectMessage(Context context, String otherUserId, String body, Callback<Message> callback) {
+        createDirectChat(context, otherUserId, new Callback<String>() {
+            @Override
+            public void onSuccess(String chatId) {
+                sendMessage(context, chatId, body, callback);
+            }
+
+            @Override
+            public void onError(String message) {
+                deliverError(callback, message);
+            }
+        });
+    }
+
+    public static void uploadMedia(Context context, java.io.File file, String contentType, Callback<String> callback) {
+        IO.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                if (file == null || !file.isFile()) throw new IllegalArgumentException("Media file does not exist.");
+                String objectPath = userId + "/" + System.currentTimeMillis() + "_" + file.getName().replaceAll("[^A-Za-z0-9._-]", "_");
+                URL url = new URL(baseUrl() + "/storage/v1/object/monogram-media/" + objectPath);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(20000);
+                connection.setReadTimeout(30000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("apikey", apiKey());
+                connection.setRequestProperty("Authorization", "Bearer " + token);
+                connection.setRequestProperty("Content-Type", contentType == null ? "application/octet-stream" : contentType);
+                connection.setRequestProperty("x-upsert", "false");
+                try (java.io.FileInputStream input = new java.io.FileInputStream(file);
+                     OutputStream output = connection.getOutputStream()) {
+                    byte[] buffer = new byte[16384];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                }
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) throw new IllegalStateException("Media upload failed (" + status + ").");
+                MAIN.post(() -> { if (callback != null) callback.onSuccess(objectPath); });
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
+    public static void createSignedMediaUrl(Context context, String objectPath, Callback<String> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                if (token.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                String encoded = objectPath == null ? "" : objectPath.replace("%", "%25").replace(" ", "%20");
+                JSONObject result = request("POST", "/storage/v1/object/sign/monogram-media/" + encoded,
+                        token, new JSONObject().put("expiresIn", 3600), null);
+                String signed = result.optString("signedURL", result.optString("signedUrl", ""));
+                if (signed.isEmpty()) throw new IllegalStateException("Supabase did not return a signed media URL.");
+                if (signed.startsWith("/")) signed = baseUrl() + "/storage/v1" + signed;
+                final String url = signed;
+                if (callback != null) MAIN.post(() -> callback.onSuccess(url));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void updateProfile(Context context, JSONObject changes, Callback<Boolean> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
+                request("PATCH", "/rest/v1/profiles?user_id=eq." + URLEncoder.encode(userId, "UTF-8"),
+                        token, changes, "return=minimal");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(true));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void createGroupChat(Context context, String title, JSONArray memberIds, Callback<String> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/create_group_chat", token,
+                        new JSONObject().put("p_title", title).put("p_member_ids", memberIds), null);
+                String chatId = result.optString("_scalar", "");
+                if (chatId.isEmpty()) throw new IllegalStateException("Server did not return a group chat ID.");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(chatId));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void claimCollectibleUsername(Context context, String username, Callback<JSONObject> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/claim_collectible_username", token,
+                        new JSONObject().put("p_username", username), null);
+                if (callback != null) MAIN.post(() -> callback.onSuccess(result));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void equipGift(Context context, String giftId, Callback<JSONObject> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                JSONObject result = request("POST", "/rest/v1/rpc/equip_monogram_gift", token,
+                        new JSONObject().put("p_gift_id", giftId), null);
+                if (callback != null) MAIN.post(() -> callback.onSuccess(result));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void loadMyGifts(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                String path = "/rest/v1/user_gifts?select=id,gift_slug,serial_number,received_at,is_equipped,gift_catalog(title,asset_key)"
+                        + "&owner_id=eq." + URLEncoder.encode(userId, "UTF-8")
+                        + "&order=received_at.desc";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void loadDirectory(Context context, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String selfId = getCurrentUserId(context);
+                String path = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,is_owner,premium_enabled"
+                        + "&user_id=neq." + URLEncoder.encode(selfId, "UTF-8")
+                        + "&order=username.asc&limit=100";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                if (callback != null) MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+
+    public static void searchProfiles(Context context, String query, Callback<JSONArray> callback) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String safe = query == null ? "" : query.trim().replace("*", "").replace(",", "");
+                String path = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,is_owner,premium_enabled"
+                        + "&username=ilike.*" + URLEncoder.encode(safe, "UTF-8") + "*&limit=30";
+                JSONObject result = request("GET", path, token, null, null);
+                JSONArray rows = result.optJSONArray("_array");
+                MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+            } catch (Exception e) {
+                FileLog.e(e);
+                deliverError(callback, e.getMessage());
+            }
+        });
+    }
+}

@@ -17,6 +17,8 @@ public class MonogramConfig {
     private static final String KEY_OWNER_ID = "owner_id";
     private static final String KEY_USERS = "registered_users";
     private static final String KEY_DEV_MODE = "dev_mode_enabled";
+    private static final String KEY_ACTIVE_USER_ID_PREFIX = "active_local_user_id_";
+    private static final String KEY_BACKEND_CHAT_ID_PREFIX = "backend_chat_id_";
 
     private static volatile MonogramConfig instance;
     private final SharedPreferences preferences;
@@ -32,6 +34,7 @@ public class MonogramConfig {
         public String phone;
         public long createdAt;
         public boolean isOwner;
+        public String backendUserId = "";
 
         public MonogramUserRecord() {}
 
@@ -55,6 +58,7 @@ public class MonogramConfig {
                 obj.put("phone", phone != null ? phone : "");
                 obj.put("createdAt", createdAt);
                 obj.put("isOwner", isOwner);
+                obj.put("backendUserId", backendUserId != null ? backendUserId : "");
             } catch (Exception e) {
                 FileLog.e(e);
             }
@@ -71,6 +75,7 @@ public class MonogramConfig {
             record.phone = obj.optString("phone", "");
             record.createdAt = obj.optLong("createdAt", System.currentTimeMillis());
             record.isOwner = obj.optBoolean("isOwner", false);
+            record.backendUserId = obj.optString("backendUserId", "");
             return record;
         }
     }
@@ -125,6 +130,67 @@ public class MonogramConfig {
         }
     }
 
+    /**
+     * Stores which local MONOGRAM profile is active for a Telegram account slot.
+     * commit() is intentional: this marker is the recovery source if UserConfig's
+     * deferred save has not completed when Android kills the process.
+     */
+    public synchronized void setActiveUserId(int account, long userId) {
+        preferences.edit().putLong(KEY_ACTIVE_USER_ID_PREFIX + account, userId).commit();
+    }
+
+    public synchronized long getActiveUserId(int account) {
+        return preferences.getLong(KEY_ACTIVE_USER_ID_PREFIX + account, 0);
+    }
+
+    public synchronized void clearActiveUserId(int account) {
+        preferences.edit().remove(KEY_ACTIVE_USER_ID_PREFIX + account).commit();
+    }
+
+    public synchronized MonogramUserRecord getUserRecord(long userId) {
+        for (MonogramUserRecord record : registeredUsers) {
+            if (record.userId == userId) {
+                MonogramUserRecord copy = new MonogramUserRecord(record.userId, record.firstName, record.lastName,
+                        record.username, record.phone, record.createdAt, record.isOwner);
+                copy.backendUserId = record.backendUserId;
+                return copy;
+            }
+        }
+        return null;
+    }
+
+    public synchronized String getBackendUserId(long localUserId) {
+        MonogramUserRecord record = getUserRecord(localUserId);
+        return record == null ? "" : (record.backendUserId == null ? "" : record.backendUserId);
+    }
+
+    public synchronized MonogramUserRecord getUserRecordByBackendId(String backendUserId) {
+        if (backendUserId == null || backendUserId.isEmpty()) return null;
+        for (MonogramUserRecord record : registeredUsers) {
+            if (backendUserId.equals(record.backendUserId)) {
+                MonogramUserRecord copy = new MonogramUserRecord(record.userId, record.firstName, record.lastName,
+                        record.username, record.phone, record.createdAt, record.isOwner);
+                copy.backendUserId = record.backendUserId;
+                return copy;
+            }
+        }
+        return null;
+    }
+
+    public synchronized void setBackendChatId(long dialogId, String chatId) {
+        if (dialogId == 0 || chatId == null || chatId.isEmpty()) return;
+        preferences.edit().putString(KEY_BACKEND_CHAT_ID_PREFIX + dialogId, chatId).apply();
+    }
+
+    public synchronized String getBackendChatId(long dialogId) {
+        return preferences.getString(KEY_BACKEND_CHAT_ID_PREFIX + dialogId, "");
+    }
+
+    public synchronized boolean isMonogramAccount(int account) {
+        long active = getActiveUserId(account);
+        return active != 0 && active == org.telegram.messenger.UserConfig.getInstance(account).getClientUserId();
+    }
+
     public synchronized long getOwnerUserId() {
         return ownerUserId;
     }
@@ -135,6 +201,12 @@ public class MonogramConfig {
 
     public synchronized boolean isOwner(long userId) {
         return userId != 0 && ownerUserId != 0 && userId == ownerUserId;
+    }
+
+    public synchronized void setOwnerUserId(long userId) {
+        if (userId <= 0) return;
+        ownerUserId = userId;
+        preferences.edit().putLong(KEY_OWNER_ID, ownerUserId).commit();
     }
 
     public synchronized void setInitialOwnerIfNone(long userId) {
@@ -156,6 +228,10 @@ public class MonogramConfig {
         }
         if (!found) {
             registeredUsers.add(user);
+        }
+        if (user.isOwner && ownerUserId == 0) {
+            ownerUserId = user.userId;
+            preferences.edit().putLong(KEY_OWNER_ID, ownerUserId).commit();
         }
         saveUsers();
     }

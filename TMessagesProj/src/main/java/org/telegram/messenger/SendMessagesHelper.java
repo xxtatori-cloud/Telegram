@@ -4439,6 +4439,53 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     public void sendMessage(SendMessageParams sendMessageParams) {
+        if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
+                && sendMessageParams.message != null
+                && sendMessageParams.photo == null
+                && sendMessageParams.document == null
+                && sendMessageParams.location == null
+                && sendMessageParams.poll == null
+                && sendMessageParams.todo == null
+                && sendMessageParams.invoice == null
+                && sendMessageParams.game == null
+                && sendMessageParams.scheduleDate == 0
+                && sendMessageParams.scheduleRepeatPeriod == 0
+                && sendMessageParams.peer != 0) {
+            final long monogramDialogId = sendMessageParams.peer;
+            org.telegram.messenger.monogram.MonogramCloudBridge.sendTextMessage(
+                    currentAccount, monogramDialogId, sendMessageParams.message,
+                    new org.telegram.messenger.monogram.MonogramBackend.Callback<org.telegram.messenger.monogram.MonogramBackend.Message>() {
+                        @Override
+                        public void onSuccess(org.telegram.messenger.monogram.MonogramBackend.Message cloudMessage) {
+                            try {
+                                org.json.JSONObject json = new org.json.JSONObject()
+                                        .put("id", cloudMessage.id)
+                                        .put("sender_id", cloudMessage.senderId)
+                                        .put("body", cloudMessage.body)
+                                        .put("created_at", cloudMessage.createdAt);
+                                TLRPC.Message message = org.telegram.messenger.monogram.MonogramCloudBridge.messageFromJson(
+                                        currentAccount, monogramDialogId, json);
+                                ArrayList<TLRPC.Message> messages = new ArrayList<>();
+                                if (message != null) messages.add(message);
+                                org.telegram.messenger.monogram.MonogramCloudBridge.storeAndNotifyMessages(
+                                        currentAccount, monogramDialogId, messages);
+                            } catch (Exception e) {
+                                FileLog.e(e);
+                            }
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            FileLog.e("MONOGRAM message send failed: " + error);
+                            AndroidUtilities.runOnUIThread(() ->
+                                    android.widget.Toast.makeText(
+                                            org.telegram.messenger.ApplicationLoader.applicationContext,
+                                            error, android.widget.Toast.LENGTH_LONG).show());
+                        }
+                    });
+            return;
+        }
+
         final SendMessageChatArguments sendMessageChatArguments = sendMessageParams.sendMessageChatArguments != null ?
                 sendMessageParams.sendMessageChatArguments : SendMessageChatArguments.EMPTY;
         String message = sendMessageParams.message;

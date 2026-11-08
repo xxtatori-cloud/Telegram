@@ -11550,6 +11550,87 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     private void loadMessagesInternal(long dialogId, long mergeDialogId, boolean loadInfo, int count, int max_id, int offset_date, boolean fromCache, int minDate, int classGuid, int load_type, int last_message_id, int mode, long threadMessageId, int loadIndex, int first_unread, int unread_count, int last_date, boolean queryFromServer, int mentionsCount, boolean loadDialog, boolean processMessages, boolean isTopic, Timer loaderLogger, long hash) {
+        if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
+                && mode == ChatActivity.MODE_DEFAULT && threadMessageId == 0 && !isTopic
+                && !DialogObject.isEncryptedDialog(dialogId) && dialogId != 0) {
+            String cloudChatId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendChatId(dialogId);
+            if (cloudChatId == null || cloudChatId.isEmpty()) {
+                String remotePeerId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendUserId(dialogId);
+                if (remotePeerId != null && !remotePeerId.isEmpty()
+                        && dialogId != getUserConfig().getClientUserId()) {
+                    org.telegram.messenger.monogram.MonogramBackend.createDirectChat(
+                            org.telegram.messenger.ApplicationLoader.applicationContext,
+                            remotePeerId,
+                            new org.telegram.messenger.monogram.MonogramBackend.Callback<String>() {
+                                @Override
+                                public void onSuccess(String newChatId) {
+                                    org.telegram.messenger.monogram.MonogramConfig.getInstance().setBackendChatId(dialogId, newChatId);
+                                    loadMessagesInternal(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, false,
+                                            minDate, classGuid, load_type, last_message_id, mode, threadMessageId, loadIndex,
+                                            first_unread, unread_count, last_date, queryFromServer, mentionsCount,
+                                            loadDialog, processMessages, isTopic, loaderLogger, hash);
+                                }
+
+                                @Override
+                                public void onError(String error) {
+                                    FileLog.e("MONOGRAM direct chat creation failed: " + error);
+                                    getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date,
+                                            minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages,
+                                            isTopic, loaderLogger);
+                                }
+                            });
+                } else {
+                    getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                }
+            } else {
+                org.telegram.messenger.monogram.MonogramRealtimeClient.subscribeOnce(
+                        org.telegram.messenger.ApplicationLoader.applicationContext,
+                        cloudChatId,
+                        new org.telegram.messenger.monogram.MonogramRealtimeClient.Listener() {
+                            @Override
+                            public void onMessage(org.telegram.messenger.monogram.MonogramBackend.Message cloudMessage) {
+                                ArrayList<TLRPC.Message> liveMessages = org.telegram.messenger.monogram.MonogramCloudBridge.convertMessages(
+                                        currentAccount, dialogId, java.util.Collections.singletonList(cloudMessage));
+                                org.telegram.messenger.monogram.MonogramCloudBridge.storeAndNotifyMessages(currentAccount, dialogId, liveMessages);
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                FileLog.e("MONOGRAM realtime: " + error);
+                            }
+                        });
+                org.telegram.messenger.monogram.MonogramBackend.loadMessages(
+                        org.telegram.messenger.ApplicationLoader.applicationContext,
+                        cloudChatId,
+                        new org.telegram.messenger.monogram.MonogramBackend.Callback<java.util.List<org.telegram.messenger.monogram.MonogramBackend.Message>>() {
+                            @Override
+                            public void onSuccess(java.util.List<org.telegram.messenger.monogram.MonogramBackend.Message> cloudMessages) {
+                                ArrayList<TLRPC.Message> converted = org.telegram.messenger.monogram.MonogramCloudBridge.convertMessages(currentAccount, dialogId, cloudMessages);
+                                TLRPC.TL_messages_messages response = new TLRPC.TL_messages_messages();
+                                response.messages.addAll(converted);
+                                response.count = converted.size();
+                                if (dialogId > 0) {
+                                    TLRPC.User peer = getUser(dialogId);
+                                    if (peer != null) response.users.add(peer);
+                                } else {
+                                    TLRPC.Chat group = getChat(-dialogId);
+                                    if (group != null) response.chats.add(group);
+                                }
+                                if (!converted.isEmpty()) {
+                                    getMessagesStorage().putMessages(response, dialogId, -1, 0, false, mode, threadMessageId);
+                                }
+                                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                FileLog.e("MONOGRAM message load failed: " + error);
+                                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                            }
+                        });
+            }
+            return;
+        }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("load messages in chat " + dialogId + " topic_id " + threadMessageId + " count " + count + " max_id " + max_id + " cache " + fromCache + " mindate = " + minDate + " guid " + classGuid + " load_type " + load_type + " last_message_id " + last_message_id + " mode " + mode + " index " + loadIndex + " firstUnread " + first_unread + " unread_count " + unread_count + " last_date " + last_date + " queryFromServer " + queryFromServer + " isTopic " + isTopic);
         }
@@ -12509,6 +12590,30 @@ public class MessagesController extends BaseController implements NotificationCe
         getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("folderId = " + folderId + " load cacheOffset = " + offset + " count = " + count + " cache = " + fromCache);
+        }
+        if (!fromCache && org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)) {
+            if (folderId != 0) {
+                loadingDialogs.put(folderId, false);
+                getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                return;
+            }
+            org.telegram.messenger.monogram.MonogramBackend.loadChats(
+                    org.telegram.messenger.ApplicationLoader.applicationContext,
+                    new org.telegram.messenger.monogram.MonogramBackend.Callback<org.json.JSONArray>() {
+                        @Override
+                        public void onSuccess(org.json.JSONArray chats) {
+                            TLRPC.TL_messages_dialogs cloudDialogs = org.telegram.messenger.monogram.MonogramCloudBridge.buildDialogs(currentAccount, chats);
+                            processLoadedDialogs(cloudDialogs, null, null, folderId, 0, count, 0, true, false, false);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            FileLog.e("MONOGRAM chat list load failed: " + error);
+                            loadingDialogs.put(folderId, false);
+                            getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                        }
+                    });
+            return;
         }
         if (fromCache) {
             getMessagesStorage().getDialogs(folderId, offset == 0 ? 0 : nextDialogsCacheOffset.get(folderId, 0), count, folderId == 0 && offset == 0);
@@ -15093,6 +15198,51 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public int createChat(String title, ArrayList<Long> selectedContacts, String about, int type, boolean forImport, Location location, String locationAddress, int ttlPeriod, BaseFragment fragment) {
+        if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
+                && type == ChatObject.CHAT_TYPE_CHAT && !forImport) {
+            org.json.JSONArray remoteMembers = new org.json.JSONArray();
+            for (Long selectedId : selectedContacts) {
+                String remoteId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendUserId(selectedId);
+                if (remoteId != null && !remoteId.isEmpty()) remoteMembers.put(remoteId);
+            }
+            org.telegram.messenger.monogram.MonogramBackend.createGroupChat(
+                    org.telegram.messenger.ApplicationLoader.applicationContext, title, remoteMembers,
+                    new org.telegram.messenger.monogram.MonogramBackend.Callback<String>() {
+                        @Override
+                        public void onSuccess(String backendChatId) {
+                            long localChatId;
+                            try {
+                                localChatId = java.util.UUID.fromString(backendChatId).getMostSignificantBits() & 0x7fffffffL;
+                            } catch (Exception e) {
+                                localChatId = (backendChatId.hashCode() & 0x7fffffffL);
+                            }
+                            if (localChatId == 0) localChatId = 1;
+                            TLRPC.TL_chat chat = new TLRPC.TL_chat();
+                            chat.id = localChatId;
+                            chat.title = title;
+                            chat.photo = new TLRPC.TL_chatPhotoEmpty();
+                            chat.date = getConnectionsManager().getCurrentTime();
+                            chat.version = 1;
+                            chat.participants_count = remoteMembers.length() + 1;
+                            chat.left = false;
+                            ArrayList<TLRPC.Chat> createdChats = new ArrayList<>();
+                            createdChats.add(chat);
+                            putChats(createdChats, false);
+                            org.telegram.messenger.monogram.MonogramConfig.getInstance().setBackendChatId(-localChatId, backendChatId);
+                            loadDialogs(0, 0, 100, false);
+                            AndroidUtilities.runOnUIThread(() ->
+                                    getNotificationCenter().postNotificationName(NotificationCenter.chatDidCreated, localChatId));
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            FileLog.e("MONOGRAM group creation failed: " + error);
+                            AndroidUtilities.runOnUIThread(() ->
+                                    getNotificationCenter().postNotificationName(NotificationCenter.chatDidFailCreate));
+                        }
+                    });
+            return 0;
+        }
         if (type == ChatObject.CHAT_TYPE_CHAT && !forImport) {
             TLRPC.TL_messages_createChat req = new TLRPC.TL_messages_createChat();
             req.title = title;
