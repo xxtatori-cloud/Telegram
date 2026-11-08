@@ -350,6 +350,23 @@ public final class MonogramBackend {
         });
     }
 
+    public static void registerDeviceToken(Context context, String fcmToken) {
+        IO.execute(() -> {
+            try {
+                String token = getAccessToken(context);
+                String userId = getCurrentUserId(context);
+                if (token.isEmpty() || userId.isEmpty() || fcmToken == null || fcmToken.isEmpty()) return;
+                JSONObject payload = new JSONObject().put("user_id", userId)
+                        .put("fcm_token", fcmToken).put("platform", "android")
+                        .put("updated_at", java.time.Instant.now().toString());
+                request("POST", "/rest/v1/device_tokens?on_conflict=fcm_token", token,
+                        payload, "resolution=merge-duplicates,return=minimal");
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
     public static void searchProfiles(Context context, String query, Callback<JSONArray> callback) {
         IO.execute(() -> {
             try {
