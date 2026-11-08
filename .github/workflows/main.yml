@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -84,10 +84,22 @@ jobs:
 
           ls -lh artifacts/
 
-      - name: Upload MONOGRAM APK
+      - name: Upload MONOGRAM APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: MONOGRAM-APK
           path: artifacts/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish direct APK download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: monogram-latest
+          name: MONOGRAM latest APK
+          target_commitish: master
+          prerelease: true
+          make_latest: false
+          files: artifacts/*.apk
+          overwrite_files: true
+          fail_on_unmatched_files: true
