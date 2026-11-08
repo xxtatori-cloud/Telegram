@@ -388,12 +388,51 @@ public final class MonogramBackend {
                 String token = getAccessToken(context);
                 String userId = getCurrentUserId(context);
                 if (token.isEmpty() || userId.isEmpty()) throw new IllegalStateException("Sign in to MONOGRAM first.");
-                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id)"
+                String path = "/rest/v1/chats?select=id,title,is_group,created_at,chat_members(user_id),messages(id,chat_id,sender_id,body,created_at)"
                         + "&chat_members.user_id=eq." + URLEncoder.encode(userId, "UTF-8")
-                        + "&order=created_at.desc";
+                        + "&messages.order=created_at.desc&messages.limit=1&order=created_at.desc";
                 JSONObject result = request("GET", path, token, null, null);
                 JSONArray rows = result.optJSONArray("_array");
-                MAIN.post(() -> callback.onSuccess(rows == null ? new JSONArray() : rows));
+                if (rows == null) rows = new JSONArray();
+
+                java.util.LinkedHashSet<String> memberIds = new java.util.LinkedHashSet<>();
+                for (int i = 0; i < rows.length(); i++) {
+                    JSONArray members = rows.getJSONObject(i).optJSONArray("chat_members");
+                    if (members == null) continue;
+                    for (int j = 0; j < members.length(); j++) {
+                        String memberId = members.getJSONObject(j).optString("user_id", "");
+                        if (!memberId.isEmpty() && !memberId.equals(userId)) memberIds.add(memberId);
+                    }
+                }
+                if (!memberIds.isEmpty()) {
+                    String inFilter = "in.(" + android.text.TextUtils.join(",", memberIds) + ")";
+                    String profilesPath = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,is_owner,premium_enabled"
+                            + "&user_id=" + URLEncoder.encode(inFilter, "UTF-8");
+                    JSONObject profilesResult = request("GET", profilesPath, token, null, null);
+                    JSONArray profiles = profilesResult.optJSONArray("_array");
+                    java.util.HashMap<String, JSONObject> profilesById = new java.util.HashMap<>();
+                    if (profiles != null) {
+                        for (int i = 0; i < profiles.length(); i++) {
+                            JSONObject profile = profiles.getJSONObject(i);
+                            profilesById.put(profile.optString("user_id", ""), profile);
+                        }
+                    }
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONObject chat = rows.getJSONObject(i);
+                        JSONArray rawMembers = chat.optJSONArray("chat_members");
+                        JSONArray enriched = new JSONArray();
+                        if (rawMembers != null) {
+                            for (int j = 0; j < rawMembers.length(); j++) {
+                                JSONObject member = rawMembers.getJSONObject(j);
+                                JSONObject profile = profilesById.get(member.optString("user_id", ""));
+                                if (profile != null) enriched.put(profile);
+                            }
+                        }
+                        chat.put("members", enriched);
+                    }
+                }
+                final JSONArray finalRows = rows;
+                if (callback != null) MAIN.post(() -> callback.onSuccess(finalRows));
             } catch (Exception e) {
                 FileLog.e(e);
                 deliverError(callback, e.getMessage());
