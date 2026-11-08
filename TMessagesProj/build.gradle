@@ -32,6 +32,9 @@ repositories {
     google()
 }
 
+def monogramSupabaseUrl = (project.findProperty('MONOGRAM_SUPABASE_URL') ?: System.getenv('MONOGRAM_SUPABASE_URL') ?: '').toString().replace('\\', '\\\\').replace('"', '\\"')
+def monogramSupabaseAnonKey = (project.findProperty('MONOGRAM_SUPABASE_ANON_KEY') ?: System.getenv('MONOGRAM_SUPABASE_ANON_KEY') ?: '').toString().replace('\\', '\\\\').replace('"', '\\"')
+
 configurations {
     compile.exclude module: 'support-v4'
 }
@@ -139,7 +142,13 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
+        buildConfigField "String", "MONOGRAM_SUPABASE_URL", "\"${monogramSupabaseUrl}\""
+        buildConfigField "String", "MONOGRAM_SUPABASE_ANON_KEY", "\"${monogramSupabaseAnonKey}\""
         minSdkVersion 23
         targetSdkVersion 36
 
