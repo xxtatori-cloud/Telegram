@@ -112,6 +112,9 @@ public final class MonogramBackend {
     }
 
     private static JSONObject request(String method, String path, String bearer, JSONObject body, String prefer) throws Exception {
+        if ("PATCH".equalsIgnoreCase(method)) {
+            return patchRequest(path, bearer, body, prefer);
+        }
         if (!isConfigured()) {
             throw new IllegalStateException("MONOGRAM backend is not configured. Set MONOGRAM_SUPABASE_URL and MONOGRAM_SUPABASE_ANON_KEY.");
         }
@@ -163,6 +166,36 @@ public final class MonogramBackend {
             return wrapper;
         }
         return new JSONObject(raw);
+    }
+
+    private static JSONObject patchRequest(String path, String bearer, JSONObject body, String prefer) throws Exception {
+        if (!isConfigured()) throw new IllegalStateException("MONOGRAM backend is not configured.");
+        okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        okhttp3.RequestBody requestBody = okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("application/json; charset=utf-8"),
+                body == null ? "{}" : body.toString());
+        okhttp3.Request.Builder builder = new okhttp3.Request.Builder()
+                .url(baseUrl() + path)
+                .patch(requestBody)
+                .header("apikey", apiKey())
+                .header("Authorization", "Bearer " + (bearer == null || bearer.isEmpty() ? apiKey() : bearer))
+                .header("Accept", "application/json");
+        if (prefer != null && !prefer.isEmpty()) builder.header("Prefer", prefer);
+        try (okhttp3.Response response = client.newCall(builder.build()).execute()) {
+            String raw = response.body() == null ? "" : response.body().string();
+            if (!response.isSuccessful()) {
+                String message = raw;
+                try {
+                    JSONObject error = new JSONObject(raw);
+                    message = error.optString("message", error.optString("details", raw));
+                } catch (Exception ignore) {}
+                throw new IllegalStateException("MONOGRAM server (" + response.code() + "): " + message);
+            }
+            return raw.isEmpty() ? new JSONObject() : new JSONObject(raw);
+        }
     }
 
     private static String cleanUsername(String value, String userId) {
