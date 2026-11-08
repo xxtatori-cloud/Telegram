@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
 
 concurrency:
   group: monogram-android-build
@@ -93,6 +96,7 @@ jobs:
           retention-days: 14
 
       - name: Publish direct APK download
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: monogram-latest
