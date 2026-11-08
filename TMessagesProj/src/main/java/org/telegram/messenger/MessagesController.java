@@ -15198,6 +15198,51 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public int createChat(String title, ArrayList<Long> selectedContacts, String about, int type, boolean forImport, Location location, String locationAddress, int ttlPeriod, BaseFragment fragment) {
+        if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
+                && type == ChatObject.CHAT_TYPE_CHAT && !forImport) {
+            org.json.JSONArray remoteMembers = new org.json.JSONArray();
+            for (Long selectedId : selectedContacts) {
+                String remoteId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendUserId(selectedId);
+                if (remoteId != null && !remoteId.isEmpty()) remoteMembers.put(remoteId);
+            }
+            org.telegram.messenger.monogram.MonogramBackend.createGroupChat(
+                    org.telegram.messenger.ApplicationLoader.applicationContext, title, remoteMembers,
+                    new org.telegram.messenger.monogram.MonogramBackend.Callback<String>() {
+                        @Override
+                        public void onSuccess(String backendChatId) {
+                            long localChatId;
+                            try {
+                                localChatId = java.util.UUID.fromString(backendChatId).getMostSignificantBits() & 0x7fffffffL;
+                            } catch (Exception e) {
+                                localChatId = (backendChatId.hashCode() & 0x7fffffffL);
+                            }
+                            if (localChatId == 0) localChatId = 1;
+                            TLRPC.TL_chat chat = new TLRPC.TL_chat();
+                            chat.id = localChatId;
+                            chat.title = title;
+                            chat.photo = new TLRPC.TL_chatPhotoEmpty();
+                            chat.date = getConnectionsManager().getCurrentTime();
+                            chat.version = 1;
+                            chat.participants_count = remoteMembers.length() + 1;
+                            chat.left = false;
+                            ArrayList<TLRPC.Chat> createdChats = new ArrayList<>();
+                            createdChats.add(chat);
+                            putChats(createdChats, false);
+                            org.telegram.messenger.monogram.MonogramConfig.getInstance().setBackendChatId(-localChatId, backendChatId);
+                            loadDialogs(0, 0, 100, false);
+                            AndroidUtilities.runOnUIThread(() ->
+                                    getNotificationCenter().postNotificationName(NotificationCenter.chatDidCreated, localChatId));
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            FileLog.e("MONOGRAM group creation failed: " + error);
+                            AndroidUtilities.runOnUIThread(() ->
+                                    getNotificationCenter().postNotificationName(NotificationCenter.chatDidFailCreate));
+                        }
+                    });
+            return 0;
+        }
         if (type == ChatObject.CHAT_TYPE_CHAT && !forImport) {
             TLRPC.TL_messages_createChat req = new TLRPC.TL_messages_createChat();
             req.title = title;
