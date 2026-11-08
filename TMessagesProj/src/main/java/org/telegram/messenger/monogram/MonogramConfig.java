@@ -203,6 +203,12 @@ public class MonogramConfig {
         return userId != 0 && ownerUserId != 0 && userId == ownerUserId;
     }
 
+    public synchronized void setOwnerUserId(long userId) {
+        if (userId <= 0) return;
+        ownerUserId = userId;
+        preferences.edit().putLong(KEY_OWNER_ID, ownerUserId).commit();
+    }
+
     public synchronized void setInitialOwnerIfNone(long userId) {
         if (ownerUserId == 0 && userId != 0) {
             ownerUserId = userId;
@@ -222,6 +228,10 @@ public class MonogramConfig {
         }
         if (!found) {
             registeredUsers.add(user);
+        }
+        if (user.isOwner && ownerUserId == 0) {
+            ownerUserId = user.userId;
+            preferences.edit().putLong(KEY_OWNER_ID, ownerUserId).commit();
         }
         saveUsers();
     }
