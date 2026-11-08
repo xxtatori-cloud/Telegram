@@ -406,7 +406,7 @@ public final class MonogramBackend {
                 }
                 if (!memberIds.isEmpty()) {
                     String inFilter = "in.(" + android.text.TextUtils.join(",", memberIds) + ")";
-                    String profilesPath = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,is_owner,premium_enabled"
+                    String profilesPath = "/rest/v1/profiles?select=user_id,username,first_name,last_name,avatar_url,monogram_number,is_owner,premium_enabled"
                             + "&user_id=" + URLEncoder.encode(inFilter, "UTF-8");
                     JSONObject profilesResult = request("GET", profilesPath, token, null, null);
                     JSONArray profiles = profilesResult.optJSONArray("_array");
