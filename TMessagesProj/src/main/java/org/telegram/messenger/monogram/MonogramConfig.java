@@ -17,6 +17,7 @@ public class MonogramConfig {
     private static final String KEY_OWNER_ID = "owner_id";
     private static final String KEY_USERS = "registered_users";
     private static final String KEY_DEV_MODE = "dev_mode_enabled";
+    private static final String KEY_ACTIVE_USER_ID_PREFIX = "active_local_user_id_";
 
     private static volatile MonogramConfig instance;
     private final SharedPreferences preferences;
@@ -123,6 +124,33 @@ public class MonogramConfig {
         } catch (Exception e) {
             FileLog.e(e);
         }
+    }
+
+    /**
+     * Stores which local MONOGRAM profile is active for a Telegram account slot.
+     * commit() is intentional: this marker is the recovery source if UserConfig's
+     * deferred save has not completed when Android kills the process.
+     */
+    public synchronized void setActiveUserId(int account, long userId) {
+        preferences.edit().putLong(KEY_ACTIVE_USER_ID_PREFIX + account, userId).commit();
+    }
+
+    public synchronized long getActiveUserId(int account) {
+        return preferences.getLong(KEY_ACTIVE_USER_ID_PREFIX + account, 0);
+    }
+
+    public synchronized void clearActiveUserId(int account) {
+        preferences.edit().remove(KEY_ACTIVE_USER_ID_PREFIX + account).commit();
+    }
+
+    public synchronized MonogramUserRecord getUserRecord(long userId) {
+        for (MonogramUserRecord record : registeredUsers) {
+            if (record.userId == userId) {
+                return new MonogramUserRecord(record.userId, record.firstName, record.lastName,
+                        record.username, record.phone, record.createdAt, record.isOwner);
+            }
+        }
+        return null;
     }
 
     public synchronized long getOwnerUserId() {
