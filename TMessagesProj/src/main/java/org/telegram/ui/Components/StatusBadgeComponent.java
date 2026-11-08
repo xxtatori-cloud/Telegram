@@ -39,6 +39,9 @@ public class StatusBadgeComponent {
         } else if (chat != null && DialogObject.getEmojiStatusDocumentId(chat.emoji_status) != 0) {
             statusDrawable.set(DialogObject.getEmojiStatusDocumentId(chat.emoji_status), animated);
             statusDrawable.setColor(colorFilter);
+        } else if (user != null && org.telegram.messenger.monogram.MonogramConfig.getInstance().isOwner(user.id)) {
+            statusDrawable.set(new org.telegram.messenger.monogram.MonogramBadgeDrawable(org.telegram.messenger.ApplicationLoader.applicationContext), animated);
+            statusDrawable.setColor(null);
         } else if (user != null && user.verified) {
             statusDrawable.set(verifiedDrawable = (verifiedDrawable == null ? new CombinedDrawable(Theme.dialogs_verifiedDrawable, Theme.dialogs_verifiedCheckDrawable) : verifiedDrawable), animated);
             statusDrawable.setColor(null);

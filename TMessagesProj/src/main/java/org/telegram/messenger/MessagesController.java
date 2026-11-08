@@ -925,6 +925,9 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public boolean isPremiumUser(TLRPC.User currentUser) {
+        if (currentUser != null && currentUser.self && org.telegram.messenger.monogram.MonogramEconomy.getInstance().isPremiumEnabled()) {
+            return true;
+        }
         return currentUser != null && currentUser.premium && !isSupportUser(currentUser);
     }
 
