@@ -11550,6 +11550,40 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     private void loadMessagesInternal(long dialogId, long mergeDialogId, boolean loadInfo, int count, int max_id, int offset_date, boolean fromCache, int minDate, int classGuid, int load_type, int last_message_id, int mode, long threadMessageId, int loadIndex, int first_unread, int unread_count, int last_date, boolean queryFromServer, int mentionsCount, boolean loadDialog, boolean processMessages, boolean isTopic, Timer loaderLogger, long hash) {
+        if (org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)
+                && mode == ChatActivity.MODE_DEFAULT && threadMessageId == 0 && !isTopic
+                && !DialogObject.isEncryptedDialog(dialogId) && dialogId > 0) {
+            String cloudChatId = org.telegram.messenger.monogram.MonogramConfig.getInstance().getBackendChatId(dialogId);
+            if (cloudChatId == null || cloudChatId.isEmpty()) {
+                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+            } else {
+                org.telegram.messenger.monogram.MonogramBackend.loadMessages(
+                        org.telegram.messenger.ApplicationLoader.applicationContext,
+                        cloudChatId,
+                        new org.telegram.messenger.monogram.MonogramBackend.Callback<java.util.List<org.telegram.messenger.monogram.MonogramBackend.Message>>() {
+                            @Override
+                            public void onSuccess(java.util.List<org.telegram.messenger.monogram.MonogramBackend.Message> cloudMessages) {
+                                ArrayList<TLRPC.Message> converted = org.telegram.messenger.monogram.MonogramCloudBridge.convertMessages(currentAccount, dialogId, cloudMessages);
+                                TLRPC.TL_messages_messages response = new TLRPC.TL_messages_messages();
+                                response.messages.addAll(converted);
+                                response.count = converted.size();
+                                TLRPC.User peer = getUser(dialogId);
+                                if (peer != null) response.users.add(peer);
+                                if (!converted.isEmpty()) {
+                                    getMessagesStorage().putMessages(response, dialogId, -1, 0, false, mode, threadMessageId);
+                                }
+                                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                FileLog.e("MONOGRAM message load failed: " + error);
+                                getMessagesStorage().getMessages(dialogId, mergeDialogId, loadInfo, count, max_id, offset_date, minDate, classGuid, load_type, mode, threadMessageId, loadIndex, processMessages, isTopic, loaderLogger);
+                            }
+                        });
+            }
+            return;
+        }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("load messages in chat " + dialogId + " topic_id " + threadMessageId + " count " + count + " max_id " + max_id + " cache " + fromCache + " mindate = " + minDate + " guid " + classGuid + " load_type " + load_type + " last_message_id " + last_message_id + " mode " + mode + " index " + loadIndex + " firstUnread " + first_unread + " unread_count " + unread_count + " last_date " + last_date + " queryFromServer " + queryFromServer + " isTopic " + isTopic);
         }
@@ -12509,6 +12543,30 @@ public class MessagesController extends BaseController implements NotificationCe
         getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("folderId = " + folderId + " load cacheOffset = " + offset + " count = " + count + " cache = " + fromCache);
+        }
+        if (!fromCache && org.telegram.messenger.monogram.MonogramCloudBridge.isActive(currentAccount)) {
+            if (folderId != 0) {
+                loadingDialogs.put(folderId, false);
+                getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                return;
+            }
+            org.telegram.messenger.monogram.MonogramBackend.loadChats(
+                    org.telegram.messenger.ApplicationLoader.applicationContext,
+                    new org.telegram.messenger.monogram.MonogramBackend.Callback<org.json.JSONArray>() {
+                        @Override
+                        public void onSuccess(org.json.JSONArray chats) {
+                            TLRPC.TL_messages_dialogs cloudDialogs = org.telegram.messenger.monogram.MonogramCloudBridge.buildDialogs(currentAccount, chats);
+                            processLoadedDialogs(cloudDialogs, null, null, folderId, 0, count, 0, true, false, false);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            FileLog.e("MONOGRAM chat list load failed: " + error);
+                            loadingDialogs.put(folderId, false);
+                            getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
+                        }
+                    });
+            return;
         }
         if (fromCache) {
             getMessagesStorage().getDialogs(folderId, offset == 0 ? 0 : nextDialogsCacheOffset.get(folderId, 0), count, folderId == 0 && offset == 0);
